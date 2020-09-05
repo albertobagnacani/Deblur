@@ -1,0 +1,9 @@
+name: deblur
+dependencies:
+  - tensorflow-gpu
+  - pandas
+  - matplotlib
+  - keras
+  - opencv
+  - numpy
+  - Pillow
