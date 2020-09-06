@@ -73,9 +73,4 @@ fabric.properties
 .idea
 venv/
 
-res/dataset
-res/dataset_partial
-res/dataset.zip
-res/checkpoints
-
-secret
+res/datasets

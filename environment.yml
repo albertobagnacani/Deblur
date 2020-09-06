@@ -1,9 +1,11 @@
 name: deblur
+channels:
+    - conda-forge
 dependencies:
   - tensorflow-gpu
   - pandas
-  - matplotlib
-  - keras
-  - opencv
   - numpy
+  - scipy
+  - opencv>=4.1.0
   - Pillow
+  - matplotlib
