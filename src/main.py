@@ -1,6 +1,7 @@
 import os
 import pickle
 import random
+import shutil
 from copy import deepcopy
 from os import listdir
 from os.path import isfile, join
@@ -16,6 +17,16 @@ cifar_train_path = cifar_path+'modified/data_batch_unified'
 cifar_test_path = cifar_path+'modified/test_batch'
 cifar_blurred_train_path = cifar_path+'modified/data_batch_unified_blurred'
 cifar_blurred_test_path = cifar_path+'modified/test_batch_blurred'
+# cifar_val_path
+# cifar_blurred_val_path
+
+reds_path = '../res/datasets/REDS/'
+reds_train_sharp = reds_path + 'train/train_sharp/'
+reds_train_blur = reds_path + 'train/train_blur/'
+reds_val_sharp = reds_path + 'val/val_sharp/'
+reds_val_blur = reds_path + 'val/val_blur/'
+# reds_test_blur = reds_path + 'test/test_sharp/'
+reds_test_blur = reds_path + 'test/test_blur/'
 
 min_sigma = 0
 max_sigma = 3
@@ -127,30 +138,51 @@ def reshape_cifar(ds):  # TODO5 can be optimized (e.g. multiprocessing)
     return np.array(result)
 
 
+def reds_merge(input_path):
+    print('Merging {}'.format(input_path))
+
+    root, dirs, files = next(os.walk(input_path))
+    dirs.sort()
+
+    count = 0
+    for dir_ in dirs:
+        root_n, dirs_n, files_n = next(os.walk(os.path.join(root, dir_)))
+        files_n.sort()
+
+        for file in files_n:
+            filename = os.path.join(root_n, file)
+            # or move/copy to a 'merged' folder
+            # shutil.move(filename, os.path.join(input_path, str(count)+".png")) # TODO uncomment
+            shutil.copyfile(filename, os.path.join(input_path, str(count)+".png")) # TODO comment
+
+            count += 1
+
+        # shutil.rmtree(root_n) # TODO uncomment
+
+
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
 
 if not os.path.exists(cifar_train_path):
-    ds = load_cifar(cifar_path)
-    ds_blurred = blur_cifar(ds)
+    dataset = load_cifar(cifar_path)
+    ds_blurred = blur_cifar(dataset)
 
-    for key in ['train', 'test']:
-        reshaped_ds = reshape_cifar(ds[key])
-        reshaped_ds_b = reshape_cifar(ds_blurred[key])
+    for k in ['train', 'test']:
+        reshaped_ds = reshape_cifar(dataset[k])
+        reshaped_ds_b = reshape_cifar(ds_blurred[k])
 
-        path = cifar_train_path if key == 'train' else cifar_test_path
-        path_b = cifar_blurred_train_path if key == 'train' else cifar_blurred_test_path
+        path_c = cifar_train_path if k == 'train' else cifar_test_path
+        path_c_b = cifar_blurred_train_path if k == 'train' else cifar_blurred_test_path
 
-        with open(path, 'wb') as f:
-            pickle.dump(reshaped_ds, f)
-        with open(path_b, 'wb') as f:
-            pickle.dump(reshaped_ds_b, f)
+        with open(path_c, 'wb') as ff:
+            pickle.dump(reshaped_ds, ff)
+        with open(path_c_b, 'wb') as ff:
+            pickle.dump(reshaped_ds_b, ff)
 
-cifar_train = unpickle(cifar_train_path)
-cifar_test = unpickle(cifar_test_path)
-cifar_blurred_train = unpickle(cifar_blurred_train_path)
-cifar_blurred_test = unpickle(cifar_blurred_test_path)
+# Those are data
+cifar = {'train': unpickle(cifar_train_path), 'test': unpickle(cifar_test_path),
+         'train_b': unpickle(cifar_blurred_train_path), 'test_b': unpickle(cifar_blurred_test_path)}
 
 '''
 # Look at images
@@ -172,3 +204,11 @@ cv2.imshow('train_b_0', cifar_blurred_train[1])
 cv2.imshow('test_b_0', cifar_blurred_test[1])
 cv2.waitKey(0)
 '''
+
+# Those are paths
+reds = {'train_s': reds_train_sharp, 'train_b': reds_train_blur, 'val_s': reds_val_sharp, 'val_b': reds_val_blur,
+        'test_b': reds_test_blur}
+
+# for key in reds: # TODO uncomment
+for k in ['val_s', 'val_b', 'test_b']: # TODO comment
+    reds_merge(reds[k])
