@@ -371,6 +371,15 @@ train_blur_generator = train_datagen.flow_from_directory(
         batch_size=batch_size, class_mode=class_mode, seed=seed)
 # batch_size=batch_size, class_mode=class_mode, seed=seed, subset='training')
 
+val_sharp_generator = train_datagen.flow_from_directory(
+        reds['val_s'],
+        target_size=target_size,
+        batch_size=batch_size, class_mode=class_mode, seed=seed)
+val_blur_generator = train_datagen.flow_from_directory(
+        reds['val_b'],
+        target_size=target_size,
+        batch_size=batch_size, class_mode=class_mode, seed=seed)
+
 
 def combine_generators(sharp_generator, blur_generator):
     while True:
@@ -383,6 +392,7 @@ def combine_generators(sharp_generator, blur_generator):
 
 
 train_generator = combine_generators(train_sharp_generator, train_blur_generator)
+validation_generator = combine_generators(val_sharp_generator, val_blur_generator)
 
 '''
 validation_generator = train_datagen.flow_from_directory(
@@ -515,8 +525,10 @@ callbacks = [tensorboard_callback]
 print(tf.config.list_physical_devices('GPU'))
 
 train_steps = data_size
+validation_steps = val_sharp_generator.samples // batch_size
 
-history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks)
+history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks,
+                    validation_data=validation_generator, validation_steps=validation_steps)
 
 model.save('../res/models/model.h5')
 model.save_weights('../res/models/weights.h5')
