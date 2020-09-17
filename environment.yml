@@ -3,8 +3,10 @@ channels:
     - conda-forge
 dependencies:
   - tensorflow-gpu
+  - scikit-image
   - numpy
   - scipy
   - opencv-python
 # TODO
 # opencv-python not on conda
+# tensorboard?

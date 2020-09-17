@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter
 import tensorflow as tf
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
@@ -20,17 +21,13 @@ from tensorflow.keras.callbacks import TensorBoard
 from tensorflow.keras.layers import Conv2D, Activation, Conv2DTranspose, Add
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers.schedules import PolynomialDecay
-
-'''
-from tensorflow.compat.v1 import ConfigProto
-from tensorflow.compat.v1 import InteractiveSession
-
-config = ConfigProto()
-config.gpu_options.allow_growth = True
-session = InteractiveSession(config=config)
-'''
+from tensorflow.keras.mixed_precision import experimental as mixed_precision
+from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
 
 tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
+
+# policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
+# mixed_precision.set_policy(policy)
 
 cifar_path = '../res/datasets/cifar-10/'
 cifar_path_modified = cifar_path + 'modified/'
@@ -85,7 +82,8 @@ image_count = {"train": len(train_generator.filenames), "val": len(val_generator
                "test": len(test_generator.filenames)}
 # Number of steps per epoch
 steps_per_epoch = {"train": np.ceil(image_count["train"]/BATCH_SIZE), "val": np.ceil(image_count["val"]/BATCH_SIZE), 
-                   "test": np.ceil(image_count["test"]/BATCH_SIZE)}'''
+                   "test": np.ceil(image_count["test"]/BATCH_SIZE)}
+'''
 
 
 def unpickle(file):
@@ -259,42 +257,6 @@ def keras_folder(paths):
     return res
 
 
-'''
-def load_save(name, model):
-    callbacks = []
-    reduce_learning_rate = ReduceLROnPlateau(monitor='loss', factor=0.1, patience=2, cooldown=2, min_lr=1e-5, verbose=1)
-    callbacks.append(reduce_learning_rate)
-
-    es = EarlyStopping(patience=5)
-    # callbacks.append(es)
-
-    if SAVE_BEST:
-        filepath = MODEL_PARAM_DIR + "model_" + NAME + "-{epoch:02d}.h5"
-        checkpoint = ModelCheckpoint(filepath, monitor='val_accuracy', verbose=1, save_best_only=True, mode='max')
-        callbacks.append(checkpoint)
-
-    if LOAD:
-        if LOAD_MODEL:
-            model = load_model(MODEL_PARAM_DIR + "model_" + name + '.h5')
-        else:
-            model.load_weights(MODEL_PARAM_DIR + "weights_" + name + '.h5')
-
-        model.compile(loss=LOSS, optimizer=OPTIMIZER, metrics=METRICS)
-    else:
-        model.compile(loss=LOSS, optimizer=OPTIMIZER, metrics=METRICS)
-        history = model.fit_generator(train_generator, validation_data=val_generator, epochs=EPOCHS,
-                                      steps_per_epoch=steps_per_epoch["train"], validation_steps=steps_per_epoch["val"],
-                                      callbacks=callbacks)
-
-        plot_learning(name, history)
-
-        model.save(MODEL_PARAM_DIR + "model_" + name + '.h5')
-        model.save_weights(MODEL_PARAM_DIR + "weights_" + name + '.h5')
-
-    return model
-'''
-
-
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
@@ -356,8 +318,7 @@ reds = {'train_s': reds_train_sharp, 'train_b': reds_train_blur, 'val_s': reds_v
 # for key in reds:
 #     reds_merge(reds[k])
 
-# train_datagen = ImageDataGenerator(rescale=rescale, validation_split=validation_split)
-train_datagen = ImageDataGenerator(rescale=rescale)
+train_datagen = ImageDataGenerator(rescale=rescale)  # validation_split=validation_split
 test_datagen = ImageDataGenerator(rescale=rescale)
 
 # Need a train_generator for both the sharp and blur images, which will be combined with a combined_generator
@@ -368,8 +329,7 @@ train_sharp_generator = train_datagen.flow_from_directory(
 train_blur_generator = train_datagen.flow_from_directory(
         reds['train_b'],
         target_size=target_size,
-        batch_size=batch_size, class_mode=class_mode, seed=seed)
-# batch_size=batch_size, class_mode=class_mode, seed=seed, subset='training')
+        batch_size=batch_size, class_mode=class_mode, seed=seed)  # subset='training'
 
 val_sharp_generator = train_datagen.flow_from_directory(
         reds['val_s'],
@@ -395,10 +355,6 @@ train_generator = combine_generators(train_sharp_generator, train_blur_generator
 validation_generator = combine_generators(val_sharp_generator, val_blur_generator)
 
 '''
-validation_generator = train_datagen.flow_from_directory(
-        '',
-        target_size=target_size,
-        batch_size=batch_size, class_mode=class_mode, seed=seed, subset='training')
 test_generator = test_datagen.flow_from_directory(
         '',
         target_size=target_size,
@@ -476,7 +432,7 @@ def generator(model, x_unwrap):
     return inp_pred
 
 
-def custom_loss(x_unwrap, img_gt):
+def custom_loss(x_unwrap, img_gt): # Could be wrapped
     n_levels = 3
 
     loss_total = 0
@@ -498,18 +454,25 @@ POWER = 0.3
 LR = PolynomialDecay(initial_learning_rate=INITIAL_LR, decay_steps=max_steps, end_learning_rate=END_LR, power=POWER)
 OPTIMIZER = Adam(lr=INITIAL_LR)
 
-# LOSS = None
+
+def psnr(y_true, y_pred):
+    return peak_signal_noise_ratio(y_true, y_pred)
+
+
+def ssim(y_true, y_pred):
+    return structural_similarity(y_true, y_pred, multichannel=True)
+
+
+METRICS = ['mse', psnr, ssim]
 METRICS = None
 
 input_sharp = Input(shape=input_shape, name='input_sharp')
 input_blur = Input(shape=input_shape, name='input_blur')
 
-# output = generator(input_blur, 'output')
 x_unwrap = []
 output = generator(input_blur, x_unwrap)
 model = Model(inputs=[input_sharp, input_blur], outputs=output)
 
-# model.compile(loss=LOSS, optimizer=OPTIMIZER, metrics=METRICS) # Wrapper for custom_loss
 model.add_loss(custom_loss(x_unwrap, input_sharp))
 model.compile(optimizer=OPTIMIZER, metrics=METRICS)
 
@@ -519,7 +482,13 @@ log_dir = '../res/logs/reds' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 
 tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=0)  # TODO1 histogram_freq=1
 
-callbacks = [tensorboard_callback]
+checkpoint_filepath = '../res/models/checkpoints/weights.{epoch:02d}-{val_loss:.2f}.h5'
+
+rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-3)
+es = EarlyStopping(monitor='loss', patience=3)
+mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True)
+
+callbacks = [tensorboard_callback, mc]
 
 # print('Using GPU: {}'.format(tf.test.is_gpu_available()))
 print(tf.config.list_physical_devices('GPU'))
@@ -527,15 +496,18 @@ print(tf.config.list_physical_devices('GPU'))
 train_steps = data_size
 validation_steps = val_sharp_generator.samples // batch_size
 
+if True:
+    model.load_weights('../res/models/weights-2.h5')
+    print('Loaded weights!')
+
 history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks,
                     validation_data=validation_generator, validation_steps=validation_steps)
 
-model.save('../res/models/model.h5')
-model.save_weights('../res/models/weights.h5')
+print('Saving model')
+model.save('../res/models/final_model.h5')  # model = load_model('model.h5')
+model.save_weights('../res/models/final_weights.h5')  # model.load_weights('weights.h5')
 
 '''
-model.fit(train_generator, steps_per_epoch=steps_per_epoch, epochs=epochs, validation_data=validation_generator,
-validation_steps=validation_steps)
 val_score = model.evaluate_generator(val_generator, steps_per_epoch["val"])
 test_score = model.evaluate_generator(test_generator, steps_per_epoch["test"])
 predict = model.predict_generator(test_generator, steps=steps_per_epoch["test"])
