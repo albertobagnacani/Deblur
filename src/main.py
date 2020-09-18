@@ -461,7 +461,7 @@ def generator(model, x_unwrap):
         cat1 = Add()([deconv1_4, conv1_4])
         deconv1_3 = res_net_block(cat1, 32, 5)
         deconv1_2 = res_net_block(deconv1_3, 32, 5)
-        deconv1_1 = res_net_block(deconv1_2, 64, 5)
+        deconv1_1 = res_net_block(deconv1_2, 32, 5)
 
         inp_pred = Conv2D(filters=channels, kernel_size=(5, 5), padding='same', activation=None)(deconv1_1)
 
@@ -554,7 +554,8 @@ tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=0)  # TODO1 h
 
 save_weights_only = False
 
-# checkpoint_filepath = '../res/models/checkpoints/'+ 'model' if not save_weights_only else 'weights'+'.{epoch:04d}-{val_loss:.4f}.h5'
+# checkpoint_filepath = '../res/models/checkpoints/'+ 'model' if not save_weights_only else 'weights'+'.{epoch:04d}-
+# {val_loss:.4f}.h5'
 checkpoint_filepath = '../res/models/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
 
 rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-3)
@@ -587,7 +588,12 @@ if train:
     print('Saved model/weights!')
 else:
     test_steps = test_generator.samples // batch_size
-    predict = model.predict_generator(test_generator, steps=test_steps)
+    predict = model.predict(test_generator, steps=test_steps)
+
+    count = 0
+    for img in predict:
+        cv2.imwrite('../res/datasets/REDS/out/test/', img)
+        count += 1
 
     '''
     val_score = model.evaluate_generator(val_generator, steps_per_epoch["val"])
