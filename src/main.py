@@ -23,6 +23,9 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers.schedules import PolynomialDecay
 from tensorflow.keras.mixed_precision import experimental as mixed_precision
 from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
+from tensorflow.python.keras.models import load_model
+
+from TensorflowDatasetLoader import TensorflowDatasetLoader
 
 tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
 
@@ -57,7 +60,8 @@ seed = 42
 
 rescale = 1./255
 # validation_split = 0.2
-target_size = (256, 256)
+# target_size = (256, 256)
+target_size = (720, 1280)
 input_shape = (256, 256, 3)
 '''
 # Depending on the backend, the channel can be the first or the last parameter of a tuple
@@ -341,10 +345,27 @@ val_blur_generator = train_datagen.flow_from_directory(
         batch_size=batch_size, class_mode=class_mode, seed=seed)
 
 
+def random_crop(sharp_batch, blur_batch):
+    random_crop_size = (256, 256)
+    s = []
+    b = []
+
+    for image_s, image_b in zip(sharp_batch, blur_batch):
+        height, width = image_s.shape[0], image_s.shape[1]
+        dy, dx = random_crop_size
+        x = np.random.randint(0, width - dx + 1)
+        y = np.random.randint(0, height - dy + 1)
+        s.append(image_s[y:(y + dy), x:(x + dx), :])
+        b.append(image_b[y:(y + dy), x:(x + dx), :])
+    return np.array(s), np.array(b)
+
+
 def combine_generators(sharp_generator, blur_generator):
     while True:
         sharp_batch = sharp_generator.next()
         blur_batch = blur_generator.next()
+
+        sharp_batch, blur_batch = random_crop(sharp_batch, blur_batch)
 
         res = [sharp_batch, blur_batch]
 
@@ -432,7 +453,7 @@ def generator(model, x_unwrap):
     return inp_pred
 
 
-def custom_loss(x_unwrap, img_gt): # Could be wrapped
+def custom_loss(x_unwrap, img_gt):  # Could be wrapped
     n_levels = 3
 
     loss_total = 0
@@ -463,7 +484,7 @@ def ssim(y_true, y_pred):
     return structural_similarity(y_true, y_pred, multichannel=True)
 
 
-METRICS = ['mse', psnr, ssim]
+# METRICS = ['mse', psnr, ssim]
 METRICS = None
 
 input_sharp = Input(shape=input_shape, name='input_sharp')
@@ -482,11 +503,12 @@ log_dir = '../res/logs/reds' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 
 tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=0)  # TODO1 histogram_freq=1
 
-checkpoint_filepath = '../res/models/checkpoints/weights.{epoch:02d}-{val_loss:.2f}.h5'
+checkpoint_filepath = '../res/models/checkpoints/weights.{epoch:04d}-{val_loss:.4f}.h5'
 
 rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-3)
 es = EarlyStopping(monitor='loss', patience=3)
-mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=True)
+mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=False, save_weights_only=True,
+                     period=1)
 
 callbacks = [tensorboard_callback, mc]
 
@@ -497,11 +519,15 @@ train_steps = data_size
 validation_steps = val_sharp_generator.samples // batch_size
 
 if True:
-    model.load_weights('../res/models/weights-2.h5')
-    print('Loaded weights!')
+    epoch = 4
+    model.load_weights('../res/models/weights-'+str(epoch)+'.h5')
+    # model = load_model('../res/models/model-'+str(epoch)+'.h5')
+    print('Loaded!')
 
 history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks,
                     validation_data=validation_generator, validation_steps=validation_steps)
+# history = model.fit(TensorflowDatasetLoader('../res/datasets/REDS/train_b/', batch_size=batch_size).dataset,
+#                     epochs=epochs, steps_per_epoch=2, callbacks=callbacks)
 
 print('Saving model')
 model.save('../res/models/final_model.h5')  # model = load_model('model.h5')
