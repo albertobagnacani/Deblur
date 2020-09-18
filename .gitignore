@@ -76,3 +76,5 @@ venv/
 res/datasets
 res/logs
 res/models
+
+src/params.json

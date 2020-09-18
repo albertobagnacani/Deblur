@@ -1,4 +1,5 @@
 import datetime
+import json
 import os
 import pickle
 import random
@@ -12,7 +13,7 @@ import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter
 import tensorflow as tf
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
 
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
@@ -51,6 +52,8 @@ reds_val_blur = reds_path + 'val/val_blur/'
 # reds_test_blur = reds_path + 'test/test_sharp/'
 reds_test_blur = reds_path + 'test/test_blur/'
 
+json_path = 'params.json'
+
 min_sigma = 0
 max_sigma = 3
 channel = 1024
@@ -79,6 +82,8 @@ class_mode = None
 epochs = 50
 # steps_per_epoch = 2000
 # validation_steps = 800
+initial_lr = 1e-4
+mc_period = 1
 
 '''
 # Number of images in each folder
@@ -261,6 +266,16 @@ def keras_folder(paths):
     return res
 
 
+with open(json_path) as json_file:
+    data = json.load(json_file)
+    epochs = data['epochs']
+    batch_size = data['batch_size']
+    seed = data['seed']
+    load_epoch = data['load_epoch']
+    initial_lr = data['initial_lr']
+    mc_period = data['mc_period']
+    train = data['train']
+
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
@@ -343,6 +358,10 @@ val_blur_generator = train_datagen.flow_from_directory(
         reds['val_b'],
         target_size=target_size,
         batch_size=batch_size, class_mode=class_mode, seed=seed)
+test_generator = test_datagen.flow_from_directory(
+        reds['test_b'],
+        target_size=target_size,
+        batch_size=batch_size, class_mode=class_mode, seed=seed)
 
 
 def random_crop(sharp_batch, blur_batch):
@@ -384,7 +403,7 @@ test_generator = test_datagen.flow_from_directory(
 
 
 def res_net_block(x, filters, ksize):
-    net = Conv2D(filters=filters, kernel_size=(ksize, ksize), padding='same', activation=Activation(tf.nn.relu))(x)
+    net = Conv2D(filters=filters, kernel_size=(ksize, ksize), padding='same', activation='relu')(x)
     net = Conv2D(filters=filters, kernel_size=(ksize, ksize), padding='same', activation=None)(net)
 
     return net
@@ -406,19 +425,19 @@ def generator(model, x_unwrap):
         inp_all = tf.concat([inp_blur, inp_pred], axis=3, name='inp')  # Use Keras layers?
 
         # Encoder
-        conv1_1 = Conv2D(filters=32, kernel_size=(5, 5), padding='same', activation=Activation(tf.nn.relu))(inp_all)
+        conv1_1 = Conv2D(filters=32, kernel_size=(5, 5), padding='same', activation='relu')(inp_all)
         conv1_2 = res_net_block(conv1_1, 32, 5)
         conv1_3 = res_net_block(conv1_2, 32, 5)
         conv1_4 = res_net_block(conv1_3, 32, 5)
 
         conv2_1 = Conv2D(filters=64, kernel_size=(5, 5), strides=2, padding='same',
-                         activation=Activation(tf.nn.relu))(conv1_4)
+                         activation='relu')(conv1_4)
         conv2_2 = res_net_block(conv2_1, 64, 5)
         conv2_3 = res_net_block(conv2_2, 64, 5)
         conv2_4 = res_net_block(conv2_3, 64, 5)
 
         conv3_1 = Conv2D(filters=128, kernel_size=(5, 5), strides=2, padding='same',
-                         activation=Activation(tf.nn.relu))(conv2_4)
+                         activation='relu')(conv2_4)
         conv3_2 = res_net_block(conv3_1, 128, 5)
         conv3_3 = res_net_block(conv3_2, 128, 5)
         conv3_4 = res_net_block(conv3_3, 128, 5)
@@ -430,7 +449,7 @@ def generator(model, x_unwrap):
 
         # Decoder
         deconv2_4 = Conv2DTranspose(filters=64, kernel_size=(4, 4), strides=2, padding='same',
-                                    activation=Activation(tf.nn.relu))(deconv3_1)
+                                    activation='relu')(deconv3_1)
         # Skip connection
         cat2 = Add()([deconv2_4, conv2_4])  # merge([x, y], mode='sum')
         deconv2_3 = res_net_block(cat2, 64, 5)
@@ -438,7 +457,7 @@ def generator(model, x_unwrap):
         deconv2_1 = res_net_block(deconv2_2, 64, 5)
 
         deconv1_4 = Conv2DTranspose(filters=32, kernel_size=(4, 4), strides=2, padding='same',
-                                    activation=Activation(tf.nn.relu))(deconv2_1)
+                                    activation='relu')(deconv2_1)
         cat1 = Add()([deconv1_4, conv1_4])
         deconv1_3 = res_net_block(cat1, 32, 5)
         deconv1_2 = res_net_block(deconv1_3, 32, 5)
@@ -469,22 +488,52 @@ def custom_loss(x_unwrap, img_gt):  # Could be wrapped
 data_size = train_sharp_generator.samples // batch_size
 max_steps = int(epochs * data_size)
 
-INITIAL_LR = 1e-4
-END_LR = 0.0
-POWER = 0.3
-LR = PolynomialDecay(initial_learning_rate=INITIAL_LR, decay_steps=max_steps, end_learning_rate=END_LR, power=POWER)
-OPTIMIZER = Adam(lr=INITIAL_LR)
+END_LR = 1e-5
+POWER = 2
+LR = PolynomialDecay(initial_learning_rate=initial_lr, decay_steps=max_steps, end_learning_rate=END_LR, power=POWER)
+OPTIMIZER = Adam(lr=initial_lr)
 
 
-def psnr(y_true, y_pred):
-    return peak_signal_noise_ratio(y_true, y_pred)
+def custom_mse(y_true, y_pred):
+    n_levels = 3
+
+    metric_total = 0
+    for i in range(n_levels):
+        batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
+        gt_i = tf.image.resize(input_sharp, [hi, wi])
+        metric = mean_squared_error(gt_i, x_unwrap[i])
+        metric_total += metric
+
+    return metric_total
 
 
-def ssim(y_true, y_pred):
-    return structural_similarity(y_true, y_pred, multichannel=True)
+def custom_psnr(y_true, y_pred):
+    n_levels = 3
+
+    metric_total = 0
+    for i in range(n_levels):
+        batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
+        gt_i = tf.image.resize(input_sharp, [hi, wi])
+        metric = peak_signal_noise_ratio(gt_i, x_unwrap[i])
+        metric_total += metric
+
+    return metric_total
 
 
-# METRICS = ['mse', psnr, ssim]
+def custom_ssim(y_true, y_pred):
+    n_levels = 3
+
+    metric_total = 0
+    for i in range(n_levels):
+        batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
+        gt_i = tf.image.resize(input_sharp, [hi, wi])
+        metric = structural_similarity(gt_i, x_unwrap[i], multichannel=True)
+        metric_total += metric
+
+    return metric_total
+
+
+# METRICS = [custom_mse, custom_psnr, custom_ssim]
 METRICS = None
 
 input_sharp = Input(shape=input_shape, name='input_sharp')
@@ -503,14 +552,17 @@ log_dir = '../res/logs/reds' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 
 tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=0)  # TODO1 histogram_freq=1
 
-checkpoint_filepath = '../res/models/checkpoints/weights.{epoch:04d}-{val_loss:.4f}.h5'
+save_weights_only = False
+
+# checkpoint_filepath = '../res/models/checkpoints/'+ 'model' if not save_weights_only else 'weights'+'.{epoch:04d}-{val_loss:.4f}.h5'
+checkpoint_filepath = '../res/models/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
 
 rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-3)
 es = EarlyStopping(monitor='loss', patience=3)
-mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=False, save_weights_only=True,
-                     period=1)
+mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=False,
+                     save_weights_only=save_weights_only, period=mc_period)
 
-callbacks = [tensorboard_callback, mc]
+callbacks = [tensorboard_callback, mc, rlrop]
 
 # print('Using GPU: {}'.format(tf.test.is_gpu_available()))
 print(tf.config.list_physical_devices('GPU'))
@@ -518,23 +570,27 @@ print(tf.config.list_physical_devices('GPU'))
 train_steps = data_size
 validation_steps = val_sharp_generator.samples // batch_size
 
-if True:
-    epoch = 4
-    model.load_weights('../res/models/weights-'+str(epoch)+'.h5')
-    # model = load_model('../res/models/model-'+str(epoch)+'.h5')
-    print('Loaded!')
+if load_epoch != 0:
+    # model.load_weights('../res/models/weights-'+str(load_epoch)+'.h5')
+    # model = load_model('../res/models/model-'+str(load_epoch)+'.h5', custom_objects={'leaky_relu': tf.nn.leaky_relu})
+    model = load_model('../res/models/model-'+str(load_epoch)+'.h5')
+    print('Loaded model/weights!')
 
-history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks,
-                    validation_data=validation_generator, validation_steps=validation_steps)
-# history = model.fit(TensorflowDatasetLoader('../res/datasets/REDS/train_b/', batch_size=batch_size).dataset,
-#                     epochs=epochs, steps_per_epoch=2, callbacks=callbacks)
+if train:
+    history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks,
+                        validation_data=validation_generator, validation_steps=validation_steps)
+    # history = model.fit(TensorflowDatasetLoader('../res/datasets/REDS/train_b/', batch_size=batch_size).dataset,
+    #                     epochs=epochs, steps_per_epoch=2, callbacks=callbacks)
 
-print('Saving model')
-model.save('../res/models/final_model.h5')  # model = load_model('model.h5')
-model.save_weights('../res/models/final_weights.h5')  # model.load_weights('weights.h5')
+    model.save('../res/models/final_model.h5')  # model = load_model('model.h5')
+    model.save_weights('../res/models/final_weights.h5')  # model.load_weights('weights.h5')
+    print('Saved model/weights!')
+else:
+    test_steps = test_generator.samples // batch_size
+    predict = model.predict_generator(test_generator, steps=test_steps)
 
-'''
-val_score = model.evaluate_generator(val_generator, steps_per_epoch["val"])
-test_score = model.evaluate_generator(test_generator, steps_per_epoch["test"])
-predict = model.predict_generator(test_generator, steps=steps_per_epoch["test"])
-'''
+    '''
+    val_score = model.evaluate_generator(val_generator, steps_per_epoch["val"])
+    test_score = model.evaluate_generator(test_generator, steps_per_epoch["test"])
+    predict = model.predict_generator(test_generator, steps=steps_per_epoch["test"])
+    '''
