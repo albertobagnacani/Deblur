@@ -27,6 +27,7 @@ from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, 
 from tensorflow.python.keras.models import load_model
 
 from TensorflowDatasetLoader import TensorflowDatasetLoader
+from utils import load_cifar, blur_cifar, reshape_cifar, unpickle
 
 tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
 
@@ -54,18 +55,6 @@ reds_test_blur = reds_path + 'test/test_blur/'
 
 json_path = 'params.json'
 
-min_sigma = 0
-max_sigma = 3
-channel = 1024
-image_size = 32
-
-seed = 42
-
-rescale = 1./255
-# validation_split = 0.2
-# target_size = (256, 256)
-target_size = (720, 1280)
-input_shape = (256, 256, 3)
 '''
 # Depending on the backend, the channel can be the first or the last parameter of a tuple
 if tf.keras.backend.image_data_format() == 'channels_first': 
@@ -76,14 +65,18 @@ INPUT_SHAPE3 = INPUT_SHAPE[0:2]+(3,)
 if tf.keras.backend.image_data_format() == 'channels_first':
     INPUT_SHAPE3 = (INPUT_SHAPE3[-1], INPUT_SHAPE3[0], INPUT_SHAPE3[1])
 '''
+seed = 42
 batch_size = 8
 class_mode = None
-
 epochs = 50
-# steps_per_epoch = 2000
-# validation_steps = 800
 initial_lr = 1e-4
 mc_period = 1
+
+rescale = 1./255
+# validation_split = 0.2
+target_size = (720, 1280)
+input_shape = (256, 256, 3) # TODO
+random_crop_size = (256, 256)
 
 '''
 # Number of images in each folder
@@ -93,178 +86,6 @@ image_count = {"train": len(train_generator.filenames), "val": len(val_generator
 steps_per_epoch = {"train": np.ceil(image_count["train"]/BATCH_SIZE), "val": np.ceil(image_count["val"]/BATCH_SIZE), 
                    "test": np.ceil(image_count["test"]/BATCH_SIZE)}
 '''
-
-
-def unpickle(file):
-    """
-    :param file:
-    :return:
-    """
-    with open(file, 'rb') as fo:
-        d = pickle.load(fo, encoding='bytes')
-    return d
-
-
-def load_cifar(path):
-    """
-    The cifar-10 files contains a dictionary with the following elements:
-    - data -- a 10000x3072 numpy array of uint8s. Each row of the array stores a 32x32 colour image.
-    The first 1024 entries contain the red channel values, the next 1024 the green, and the final 1024 the blue.
-    The image is stored in row-major order, so that the first 32 entries of the array are the red channel values of the
-    first row of the image.
-    - labels -- a list of 10000 numbers in the range 0-9. The number at index i indicates the label of the ith image in
-    the array data.
-
-    The dataset contains another file, called batches.meta. It too contains a Python dictionary object.
-    It has the following entries:
-    - label_names -- a 10-element list which gives meaningful names to the numeric labels in the labels array described
-    above. For example, label_names[0] == "airplane", label_names[1] == "automobile", etc.
-
-    :param path:
-    :return:
-    """
-    files = [f for f in listdir(path) if isfile(join(path, f)) and 'batch' in f]
-    files.sort()
-
-    train = []
-    test = []
-    for file in files:
-        filename = os.path.join(path, file)
-        batch = unpickle(filename)
-
-        if 'data_batch' in filename:
-            train.append(batch)
-        elif 'test_batch' in filename:
-            test.append(batch)
-
-    return {'train': train, 'val': [], 'test': test}
-
-
-def blur_cifar(ds):  # TODO5 can be optimized (e.g. multiprocessing)
-    """
-    Applies gaussian blurring with random stdev between 0 and 3 (included).
-
-    The saved dataset was created with seed = 42.
-
-    :param ds:
-    :return:
-    """
-    print('Blurring')
-    result = {key: [] for key in ds}
-
-    for key in ds:
-        for entry in ds[key]:
-            tmp = []
-
-            for image in entry[b'data']:
-                blurred = []  # 0 = red, 1 = green, 2 = blue
-                sigma = random.randint(min_sigma, max_sigma)
-
-                for i in range(3):
-                    img_c = np.reshape(image[channel*i:channel*(i+1)], (image_size, image_size))
-
-                    blurred_c = np.reshape(gaussian_filter(img_c, sigma), (channel,))
-                    blurred.extend(blurred_c)
-
-                tmp.append(blurred)
-
-            new_entry = deepcopy(entry)  # deepcopy is heavy
-            new_entry[b'data'] = np.array(tmp)
-            result[key].append(new_entry)
-
-    return result
-
-
-def reshape_cifar(ds):  # TODO5 can be optimized (e.g. multiprocessing)
-    """
-
-    :param ds:
-    :return:
-    """
-    print('Reshaping')
-    result = []
-
-    for entry in ds:
-        for image in entry[b'data']:
-            img = []
-
-            for i in range(3):
-                img_c = np.reshape(image[channel * i:channel * (i + 1)], (image_size, image_size))
-
-                img.append(img_c)
-
-            img_m = np.array(img).swapaxes(0, 1).swapaxes(1, 2)  # (3, 32, 32) -> (32, 32, 3)
-            result.append(img_m)
-
-    return np.array(result)
-
-
-def save_cifar(ds, path):
-    """
-
-    :param ds:
-    :param path:
-    :return:
-    """
-    count = 0
-
-    for image in ds:
-        cv2.imwrite(path+str(count)+'.png', image)
-        count += 1
-
-
-def reds_merge(input_path):
-    """
-
-    :param input_path:
-    :return:
-    """
-    print('Merging {}'.format(input_path))
-
-    root, dirs, files = next(os.walk(input_path))
-    dirs.sort()
-
-    count = 0
-    for dir_ in dirs:
-        root_n, dirs_n, files_n = next(os.walk(os.path.join(root, dir_)))
-        files_n.sort()
-
-        for file in files_n:
-            filename = os.path.join(root_n, file)
-            # or move/copy to a 'merged' folder
-            # shutil.move(filename, os.path.join(input_path, str(count)+".png"))
-            shutil.copyfile(filename, os.path.join(input_path, str(count)+".png"))
-
-            count += 1
-
-        # shutil.rmtree(root_n)
-
-
-# TODO1 should do directly on reds_merge and save_cifar
-def keras_folder(paths):
-    """
-
-    :param paths:
-    :return:
-    """
-    print('Moving')
-
-    res = {key: '' for key in paths}
-
-    for key in paths:
-        p = paths[key]
-        new_p = p + 'folder/'
-
-        Path(new_p).mkdir(parents=True, exist_ok=True)
-
-        files = [f for f in listdir(p) if isfile(join(p, f))]
-        for f in files:
-            shutil.move(p + f, new_p)
-
-        res[key] = new_p
-
-    return res
-
 
 with open(json_path) as json_file:
     data = json.load(json_file)
@@ -365,7 +186,6 @@ test_generator = test_datagen.flow_from_directory(
 
 
 def random_crop(sharp_batch, blur_batch):
-    random_crop_size = (256, 256)
     s = []
     b = []
 
@@ -391,8 +211,19 @@ def combine_generators(sharp_generator, blur_generator):
         yield res
 
 
+def combine_generators_no_random_crop(sharp_generator, blur_generator):
+    while True:
+        sharp_batch = sharp_generator.next()
+        blur_batch = blur_generator.next()
+
+        res = [sharp_batch, blur_batch]
+
+        yield res
+
+
 train_generator = combine_generators(train_sharp_generator, train_blur_generator)
 validation_generator = combine_generators(val_sharp_generator, val_blur_generator)
+test_val_generator = combine_generators_no_random_crop(val_sharp_generator, val_blur_generator)
 
 '''
 test_generator = test_datagen.flow_from_directory(
@@ -409,20 +240,29 @@ def res_net_block(x, filters, ksize):
     return net
 
 
-def generator(model, x_unwrap):
+def generator(inp, x_unwrap=[]):
+# def generator(inp):
     channels = 3
     n_levels = 3
     starting_scale = 0.5
 
-    inp_pred = model
+    # b, h, w, c = inp.get_shape()
+
+    if train:
+        h, w = random_crop_size
+    else:
+        h, w = target_size[0], target_size[1]
+
+    # x_unwrap = []
+    inp_pred = inp
     for i in range(n_levels):
         scale = starting_scale ** (n_levels - i - 1)
-        hi = int(round((input_shape[0]*scale)))
-        wi = int(round((input_shape[1]*scale)))
+        hi = int(round((h*scale)))
+        wi = int(round((w*scale)))
 
-        inp_blur = tf.image.resize(model, [hi, wi])
+        inp_blur = tf.image.resize(inp, [hi, wi])
         inp_pred = tf.image.resize(inp_pred, [hi, wi])
-        inp_all = tf.concat([inp_blur, inp_pred], axis=3, name='inp')  # Use Keras layers?
+        inp_all = tf.concat([inp_blur, inp_pred], axis=3, name='inp')  # Use Keras layers? Why this?
 
         # Encoder
         conv1_1 = Conv2D(filters=32, kernel_size=(5, 5), padding='same', activation='relu')(inp_all)
@@ -488,53 +328,49 @@ def custom_loss(x_unwrap, img_gt):  # Could be wrapped
 data_size = train_sharp_generator.samples // batch_size
 max_steps = int(epochs * data_size)
 
+'''
 END_LR = 1e-5
 POWER = 2
 LR = PolynomialDecay(initial_learning_rate=initial_lr, decay_steps=max_steps, end_learning_rate=END_LR, power=POWER)
+'''
 OPTIMIZER = Adam(lr=initial_lr)
 
 
-def custom_mse(y_true, y_pred):
+def custom_mse(x_unwrap, input_sharp):
+    def c_mse(y_true, y_pred):
+        n_levels = 3
+
+        metric_total = 0
+        for i in range(n_levels):
+            batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
+            gt_i = tf.image.resize(input_sharp, [hi, wi])
+            metric = mean_squared_error(gt_i, x_unwrap[i])
+            metric_total += metric
+
+        return metric_total
+    return c_mse
+
+
+def log10(x):
+    numerator = tf.math.log(x)
+    denominator = tf.math.log(tf.constant(10, dtype=numerator.dtype))
+    return numerator / denominator
+
+
+def custom_psnr(x_unwrap, input_sharp):
     n_levels = 3
 
     metric_total = 0
     for i in range(n_levels):
         batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
         gt_i = tf.image.resize(input_sharp, [hi, wi])
-        metric = mean_squared_error(gt_i, x_unwrap[i])
+        metric = 20*log10((1.0 ** 2) / tf.math.sqrt(tf.reduce_mean((gt_i - x_unwrap[i]) ** 2)))
         metric_total += metric
+
+    metric_total /= 3
 
     return metric_total
 
-
-def custom_psnr(y_true, y_pred):
-    n_levels = 3
-
-    metric_total = 0
-    for i in range(n_levels):
-        batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
-        gt_i = tf.image.resize(input_sharp, [hi, wi])
-        metric = peak_signal_noise_ratio(gt_i, x_unwrap[i])
-        metric_total += metric
-
-    return metric_total
-
-
-def custom_ssim(y_true, y_pred):
-    n_levels = 3
-
-    metric_total = 0
-    for i in range(n_levels):
-        batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
-        gt_i = tf.image.resize(input_sharp, [hi, wi])
-        metric = structural_similarity(gt_i, x_unwrap[i], multichannel=True)
-        metric_total += metric
-
-    return metric_total
-
-
-# METRICS = [custom_mse, custom_psnr, custom_ssim]
-METRICS = None
 
 input_sharp = Input(shape=input_shape, name='input_sharp')
 input_blur = Input(shape=input_shape, name='input_blur')
@@ -543,10 +379,19 @@ x_unwrap = []
 output = generator(input_blur, x_unwrap)
 model = Model(inputs=[input_sharp, input_blur], outputs=output)
 
+# x_unwrap = generator(input_blur)
+# model = Model(inputs=[input_sharp, input_blur], outputs=x_unwrap)
+
+METRICS = None
+# METRICS = [custom_mse(x_unwrap, input_sharp)]
+
 model.add_loss(custom_loss(x_unwrap, input_sharp))
+# Since training happens on batch of images we will use the mean of SSIM values of all the images in the batch as the
+# loss value -> Batch_mean(mean_scales_mse)
+model.add_metric(custom_psnr(x_unwrap, input_sharp), name='mean_scales_psnr', aggregation='mean')
 model.compile(optimizer=OPTIMIZER, metrics=METRICS)
 
-print(model.summary())
+# print(model.summary())
 
 log_dir = '../res/logs/reds' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 
@@ -572,9 +417,8 @@ train_steps = data_size
 validation_steps = val_sharp_generator.samples // batch_size
 
 if load_epoch != 0:
-    # model.load_weights('../res/models/weights-'+str(load_epoch)+'.h5')
-    # model = load_model('../res/models/model-'+str(load_epoch)+'.h5', custom_objects={'leaky_relu': tf.nn.leaky_relu})
-    model = load_model('../res/models/model-'+str(load_epoch)+'.h5')
+    model.load_weights('../res/models/model-'+str(load_epoch)+'.h5')
+    # model = load_model('../res/models/model-'+str(load_epoch)+'.h5')
     print('Loaded model/weights!')
 
 if train:
@@ -588,11 +432,13 @@ if train:
     print('Saved model/weights!')
 else:
     test_steps = test_generator.samples // batch_size
-    predict = model.predict(test_generator, steps=test_steps)
+
+    pred = model.predict(test_val_generator, steps=validation_steps, batch_size=batch_size)
 
     count = 0
-    for img in predict:
-        cv2.imwrite('../res/datasets/REDS/out/test/', img)
+    for img in pred:
+        imguint8 = img * 255
+        cv2.imwrite('../res/datasets/REDS/out/test/'+str(count)+'.png', cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
         count += 1
 
     '''
