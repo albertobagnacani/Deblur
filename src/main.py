@@ -12,6 +12,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter
+import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import tensorflow as tf
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
 
@@ -27,6 +29,7 @@ from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, 
 from tensorflow.python.keras.models import load_model
 
 from TensorflowDatasetLoader import TensorflowDatasetLoader
+from image import avg_metric
 from utils import load_cifar, blur_cifar, reshape_cifar, unpickle
 
 tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
@@ -50,7 +53,7 @@ reds_train_sharp = reds_path + 'train/train_sharp/'
 reds_train_blur = reds_path + 'train/train_blur/'
 reds_val_sharp = reds_path + 'val/val_sharp/'
 reds_val_blur = reds_path + 'val/val_blur/'
-# reds_test_blur = reds_path + 'test/test_sharp/'
+# reds_test_sharp = reds_path + 'test/test_sharp/'
 reds_test_blur = reds_path + 'test/test_blur/'
 
 json_path = 'params.json'
@@ -95,7 +98,15 @@ with open(json_path) as json_file:
     load_epoch = data['load_epoch']
     initial_lr = data['initial_lr']
     mc_period = data['mc_period']
+    subset = data['subset']
     train = data['train']
+
+if subset:
+    reds_train_sharp = reds_path + 'train_s/train_sharp/'
+    reds_train_blur = reds_path + 'train_s/train_blur/'
+    reds_val_sharp = reds_path + 'val_s/val_sharp/'
+    reds_val_blur = reds_path + 'val_s/val_blur/'
+    reds_test_blur = reds_path + 'test/test_blur/'
 
 random.seed(seed)
 np.random.seed(seed)
@@ -179,6 +190,16 @@ val_blur_generator = train_datagen.flow_from_directory(
         reds['val_b'],
         target_size=target_size,
         batch_size=batch_size, class_mode=class_mode, seed=seed)
+
+test_val_sharp_generator = train_datagen.flow_from_directory(
+        reds['val_s'],
+        target_size=target_size,
+        batch_size=1, class_mode=class_mode, seed=seed, shuffle=False)
+test_val_blur_generator = train_datagen.flow_from_directory(
+        reds['val_b'],
+        target_size=target_size,
+        batch_size=1, class_mode=class_mode, seed=seed, shuffle=False)
+
 test_generator = test_datagen.flow_from_directory(
         reds['test_b'],
         target_size=target_size,
@@ -223,7 +244,7 @@ def combine_generators_no_random_crop(sharp_generator, blur_generator):
 
 train_generator = combine_generators(train_sharp_generator, train_blur_generator)
 validation_generator = combine_generators(val_sharp_generator, val_blur_generator)
-test_val_generator = combine_generators_no_random_crop(val_sharp_generator, val_blur_generator)
+test_val_generator = combine_generators_no_random_crop(test_val_sharp_generator, test_val_blur_generator)
 
 '''
 test_generator = test_datagen.flow_from_directory(
@@ -357,7 +378,7 @@ def log10(x):
     return numerator / denominator
 
 
-def custom_psnr(x_unwrap, input_sharp):
+def custom_psnr(x_unwrap, input_sharp, last_scale=False):
     n_levels = 3
 
     metric_total = 0
@@ -368,6 +389,9 @@ def custom_psnr(x_unwrap, input_sharp):
         metric_total += metric
 
     metric_total /= 3
+
+    if last_scale:
+        return metric
 
     return metric_total
 
@@ -395,7 +419,7 @@ model.compile(optimizer=OPTIMIZER, metrics=METRICS)
 
 log_dir = '../res/logs/reds' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 
-tensorboard_callback = TensorBoard(log_dir=log_dir, histogram_freq=0)  # TODO1 histogram_freq=1
+tensorboard_callback = TensorBoard(log_dir=log_dir)  # histogram_freq=1, profile_batch='10,20'
 
 save_weights_only = False
 
@@ -403,7 +427,7 @@ save_weights_only = False
 # {val_loss:.4f}.h5'
 checkpoint_filepath = '../res/models/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
 
-rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-3)
+rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-5)
 es = EarlyStopping(monitor='loss', patience=3)
 mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=False,
                      save_weights_only=save_weights_only, period=mc_period)
@@ -433,13 +457,35 @@ if train:
 else:
     test_steps = test_generator.samples // batch_size
 
+    names = test_val_sharp_generator.filenames
+    names = iter(names)
+
+    '''
     pred = model.predict(test_val_generator, steps=validation_steps, batch_size=batch_size)
 
     count = 0
     for img in pred:
         imguint8 = img * 255
-        cv2.imwrite('../res/datasets/REDS/out/test/'+str(count)+'.png', cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+        #cv2.imwrite('../res/datasets/REDS/out/test/'+str(count)+'.png', cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+        cv2.imwrite('../res/datasets/REDS/out/test/'+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
         count += 1
+        print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
+    '''
+
+    if False:
+        count = 0
+        for batch in test_val_generator:
+            p = model(batch)
+            imguint8 = np.squeeze(p.numpy()*255, axis=0)
+            cv2.imwrite('../res/datasets/REDS/out/test/'+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+            count += 1
+            print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
+
+    if True:
+        original_path = reds_val_sharp+'folder/'
+        deblurred_path = '../res/datasets/REDS/out/test/folder/'
+        a_m, a_p, a_s = avg_metric(original_path, deblurred_path)
+        print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))
 
     '''
     val_score = model.evaluate_generator(val_generator, steps_per_epoch["val"])
