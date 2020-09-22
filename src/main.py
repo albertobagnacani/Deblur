@@ -1,36 +1,26 @@
 import datetime
 import json
-import os
 import pickle
 import random
-import shutil
-from copy import deepcopy
-from os import listdir
-from os.path import isfile, join
 from pathlib import Path
 
 import cv2
 import numpy as np
-from scipy.ndimage import gaussian_filter
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import tensorflow as tf
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
+from skimage.metrics import mean_squared_error
 
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Input
 from tensorflow.keras.callbacks import TensorBoard
-from tensorflow.keras.layers import Conv2D, Activation, Conv2DTranspose, Add
+from tensorflow.keras.layers import Conv2D, Conv2DTranspose, Add
 from tensorflow.keras.models import Model
-from tensorflow.keras.optimizers.schedules import PolynomialDecay
-from tensorflow.keras.mixed_precision import experimental as mixed_precision
 from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
-from tensorflow.python.keras.models import load_model
 
-from TensorflowDatasetLoader import TensorflowDatasetLoader
-from image import avg_metric
-from utils import load_cifar, blur_cifar, reshape_cifar, unpickle
+from utils.eval import avg_metric
+from utils.dataset import load_cifar, blur_cifar, reshape_cifar, unpickle
 
 tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
 
@@ -77,7 +67,6 @@ mc_period = 1
 
 rescale = 1./255
 # validation_split = 0.2
-target_size = (720, 1280)
 input_shape = (None, None, 3)
 random_crop_size = (256, 256)
 
@@ -92,6 +81,8 @@ steps_per_epoch = {"train": np.ceil(image_count["train"]/BATCH_SIZE), "val": np.
 
 with open(json_path) as json_file:
     data = json.load(json_file)
+
+    task = data["task"]
     epochs = data['epochs']
     batch_size = data['batch_size']
     seed = data['seed']
@@ -99,7 +90,12 @@ with open(json_path) as json_file:
     initial_lr = data['initial_lr']
     mc_period = data['mc_period']
     subset = data['subset']
-    train = data['train']
+    action = data['action']
+
+if 'reds' in task:
+    target_size = (720, 1280)
+else:
+    target_size = (32, 32)
 
 if subset:
     reds_train_sharp = reds_path + 'train_s/train_sharp/'
@@ -169,41 +165,65 @@ reds = {'train_s': reds_train_sharp, 'train_b': reds_train_blur, 'val_s': reds_v
 # for key in reds:
 #     reds_merge(reds[k])
 
-train_datagen = ImageDataGenerator(rescale=rescale)  # validation_split=validation_split
+if 'reds' in task:
+    validation_split = 0
+else:
+    validation_split = 0.1
+
+train_datagen = ImageDataGenerator(rescale=rescale, validation_split=validation_split)
 test_datagen = ImageDataGenerator(rescale=rescale)
 
 # Need a train_generator for both the sharp and blur images, which will be combined with a combined_generator
-train_sharp_generator = train_datagen.flow_from_directory(
-        reds['train_s'],
-        target_size=target_size,
-        batch_size=batch_size, class_mode=class_mode, seed=seed)
-train_blur_generator = train_datagen.flow_from_directory(
-        reds['train_b'],
-        target_size=target_size,
-        batch_size=batch_size, class_mode=class_mode, seed=seed)  # subset='training'
+if 'reds' in task:
+    train_sharp_generator = train_datagen.flow_from_directory(
+            reds['train_s'],
+            target_size=target_size,
+            batch_size=batch_size, class_mode=class_mode, seed=seed)
+    train_blur_generator = train_datagen.flow_from_directory(
+            reds['train_b'],
+            target_size=target_size,
+            batch_size=batch_size, class_mode=class_mode, seed=seed)  # subset='training'
 
-val_sharp_generator = train_datagen.flow_from_directory(
-        reds['val_s'],
-        target_size=target_size,
-        batch_size=batch_size, class_mode=class_mode, seed=seed)
-val_blur_generator = train_datagen.flow_from_directory(
-        reds['val_b'],
-        target_size=target_size,
-        batch_size=batch_size, class_mode=class_mode, seed=seed)
+    val_sharp_generator = train_datagen.flow_from_directory(
+            reds['val_s'],
+            target_size=target_size,
+            batch_size=batch_size, class_mode=class_mode, seed=seed)
+    val_blur_generator = train_datagen.flow_from_directory(
+            reds['val_b'],
+            target_size=target_size,
+            batch_size=batch_size, class_mode=class_mode, seed=seed)
 
-test_val_sharp_generator = train_datagen.flow_from_directory(
-        reds['val_s'],
-        target_size=target_size,
-        batch_size=1, class_mode=class_mode, seed=seed, shuffle=False)
-test_val_blur_generator = train_datagen.flow_from_directory(
-        reds['val_b'],
-        target_size=target_size,
-        batch_size=1, class_mode=class_mode, seed=seed, shuffle=False)
+    test_val_sharp_generator = train_datagen.flow_from_directory(
+            reds['val_s'],
+            target_size=target_size,
+            batch_size=1, class_mode=class_mode, seed=seed, shuffle=False)
+    test_val_blur_generator = train_datagen.flow_from_directory(
+            reds['val_b'],
+            target_size=target_size,
+            batch_size=1, class_mode=class_mode, seed=seed, shuffle=False)
 
-test_generator = test_datagen.flow_from_directory(
-        reds['test_b'],
-        target_size=target_size,
-        batch_size=batch_size, class_mode=class_mode, seed=seed)
+    test_generator = test_datagen.flow_from_directory(
+            reds['test_b'],
+            target_size=target_size,
+            batch_size=batch_size, class_mode=class_mode, seed=seed)
+else:
+    train_sharp_generator = train_datagen.flow(
+            x=cifar['train'],
+            y=None,
+            batch_size=batch_size, seed=seed, subset='training')
+    train_blur_generator = train_datagen.flow(
+        x=cifar['train_b'],
+        y=None,
+        batch_size=batch_size, seed=seed, subset='training')
+
+    val_sharp_generator = train_datagen.flow(
+        x=cifar['train'],
+        y=None,
+        batch_size=batch_size, seed=seed, subset='validation')
+    val_blur_generator = train_datagen.flow(
+        x=cifar['train_b'],
+        y=None,
+        batch_size=batch_size, seed=seed, subset='validation')
 
 
 def random_crop(sharp_batch, blur_batch):
@@ -242,9 +262,13 @@ def combine_generators_no_random_crop(sharp_generator, blur_generator):
         yield res
 
 
-train_generator = combine_generators(train_sharp_generator, train_blur_generator)
-validation_generator = combine_generators(val_sharp_generator, val_blur_generator)
-test_val_generator = combine_generators_no_random_crop(test_val_sharp_generator, test_val_blur_generator)
+if 'reds' in task:
+    train_generator = combine_generators(train_sharp_generator, train_blur_generator)
+    validation_generator = combine_generators(val_sharp_generator, val_blur_generator)
+    test_val_generator = combine_generators_no_random_crop(test_val_sharp_generator, test_val_blur_generator)
+else:
+    train_generator = combine_generators_no_random_crop(train_sharp_generator, train_blur_generator)
+    validation_generator = combine_generators_no_random_crop(val_sharp_generator, val_blur_generator)
 
 '''
 test_generator = test_datagen.flow_from_directory(
@@ -269,8 +293,11 @@ def generator(inp, x_unwrap=[]):
 
     # b, h, w, c = inp.get_shape()
 
-    if train:
-        h, w = random_crop_size
+    if action == 0:
+        if 'reds' in task:
+            h, w = random_crop_size
+        else:
+            h, w = target_size[0], target_size[1]
     else:
         h, w = target_size[0], target_size[1]
 
@@ -346,10 +373,10 @@ def custom_loss(x_unwrap, img_gt):  # Could be wrapped
     return loss_total
 
 
+'''
 data_size = train_sharp_generator.samples // batch_size
 max_steps = int(epochs * data_size)
 
-'''
 END_LR = 1e-5
 POWER = 2
 LR = PolynomialDecay(initial_learning_rate=initial_lr, decay_steps=max_steps, end_learning_rate=END_LR, power=POWER)
@@ -417,15 +444,16 @@ model.compile(optimizer=OPTIMIZER, metrics=METRICS)
 
 # print(model.summary())
 
-log_dir = '../res/logs/reds' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+minor_path = 'reds' if 'reds' in task else 'cifar'
 
-tensorboard_callback = TensorBoard(log_dir=log_dir)  # histogram_freq=1, profile_batch='10,20'
+log_dir = '../res/logs/'+minor_path+'/'+minor_path + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+tensorboard_callback = TensorBoard(log_dir=log_dir)  # , histogram_freq=1, profile_batch='1')
 
 save_weights_only = False
 
 # checkpoint_filepath = '../res/models/checkpoints/'+ 'model' if not save_weights_only else 'weights'+'.{epoch:04d}-
 # {val_loss:.4f}.h5'
-checkpoint_filepath = '../res/models/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
+checkpoint_filepath = '../res/models/'+minor_path+'/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
 
 rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-5)
 es = EarlyStopping(monitor='loss', patience=3)
@@ -437,24 +465,28 @@ callbacks = [tensorboard_callback, mc, rlrop]
 # print('Using GPU: {}'.format(tf.test.is_gpu_available()))
 print(tf.config.list_physical_devices('GPU'))
 
-train_steps = data_size
-validation_steps = val_sharp_generator.samples // batch_size
+if 'reds' in task:
+    train_steps = train_sharp_generator.samples // batch_size
+    validation_steps = val_sharp_generator.samples // batch_size
+else:
+    train_steps = len(train_sharp_generator)
+    validation_steps = len(val_sharp_generator)
 
 if load_epoch != 0:
-    model.load_weights('../res/models/model-'+str(load_epoch)+'.h5')
+    model.load_weights('../res/models/'+minor_path+'/model-'+str(load_epoch)+'.h5')
     # model = load_model('../res/models/model-'+str(load_epoch)+'.h5')
     print('Loaded model/weights!')
 
-if train:
+if action == 0:
     history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks,
                         validation_data=validation_generator, validation_steps=validation_steps)
     # history = model.fit(TensorflowDatasetLoader('../res/datasets/REDS/train_b/', batch_size=batch_size).dataset,
     #                     epochs=epochs, steps_per_epoch=2, callbacks=callbacks)
 
-    model.save('../res/models/final_model.h5')  # model = load_model('model.h5')
-    model.save_weights('../res/models/final_weights.h5')  # model.load_weights('weights.h5')
+    model.save('../res/models/'+minor_path+'/final_model.h5')  # model = load_model('model.h5')
+    model.save_weights('../res/models/'+minor_path+'/final_weights.h5')  # model.load_weights('weights.h5')
     print('Saved model/weights!')
-else:
+else:  # TODO cifar
     test_steps = test_generator.samples // batch_size
 
     names = test_val_sharp_generator.filenames
@@ -472,18 +504,22 @@ else:
         print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
     '''
 
-    if False:
+    out = '../res/datasets/REDS/out/test/'
+
+    if action == 1:
+        Path(out+'folder/').mkdir(parents=True, exist_ok=True)
+
         count = 0
         for batch in test_val_generator:
             p = model(batch)
             imguint8 = np.squeeze(p.numpy()*255, axis=0)
-            cv2.imwrite('../res/datasets/REDS/out/test/'+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(out+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
             count += 1
             print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
 
-    if True:
+    if action == 2:
         original_path = reds_val_sharp+'folder/'
-        deblurred_path = '../res/datasets/REDS/out/test/folder/'
+        deblurred_path = out+'folder/'
         a_m, a_p, a_s = avg_metric(original_path, deblurred_path)
         print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))
 

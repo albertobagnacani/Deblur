@@ -5,7 +5,7 @@ import cv2
 from skimage.metrics import peak_signal_noise_ratio, mean_squared_error, structural_similarity
 
 
-def avg_metric(original_path, test_path):
+def avg_metric(original_path, test_path):  # TODO1 multiprocessing
     sum_psnr = 0
     sum_mse = 0
     sum_ssim = 0
