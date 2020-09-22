@@ -19,7 +19,7 @@ from tensorflow.keras.layers import Conv2D, Conv2DTranspose, Add
 from tensorflow.keras.models import Model
 from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
 
-from utils.eval import avg_metric
+from utils.eval import avg_metric, avg_metric_arr
 from utils.dataset import load_cifar, blur_cifar, reshape_cifar, unpickle
 
 tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
@@ -224,6 +224,14 @@ else:
         x=cifar['train_b'],
         y=None,
         batch_size=batch_size, seed=seed, subset='validation')
+    test_sharp_generator = test_datagen.flow(
+        x=cifar['test'],
+        y=None,
+        batch_size=batch_size, seed=seed, shuffle=False)
+    test_blur_generator = test_datagen.flow(
+        x=cifar['test_b'],
+        y=None,
+        batch_size=batch_size, seed=seed, shuffle=False)
 
 
 def random_crop(sharp_batch, blur_batch):
@@ -269,6 +277,7 @@ if 'reds' in task:
 else:
     train_generator = combine_generators_no_random_crop(train_sharp_generator, train_blur_generator)
     validation_generator = combine_generators_no_random_crop(val_sharp_generator, val_blur_generator)
+    test_generator = combine_generators_no_random_crop(test_sharp_generator, test_blur_generator)
 
 '''
 test_generator = test_datagen.flow_from_directory(
@@ -486,45 +495,79 @@ if action == 0:
     model.save('../res/models/'+minor_path+'/final_model.h5')  # model = load_model('model.h5')
     model.save_weights('../res/models/'+minor_path+'/final_weights.h5')  # model.load_weights('weights.h5')
     print('Saved model/weights!')
-else:  # TODO cifar
-    test_steps = test_generator.samples // batch_size
+else:
+    if 'reds' in task:
+        names = test_val_sharp_generator.filenames
+        names = iter(names)
 
-    names = test_val_sharp_generator.filenames
-    names = iter(names)
-
-    '''
-    pred = model.predict(test_val_generator, steps=validation_steps, batch_size=batch_size)
-
-    count = 0
-    for img in pred:
-        imguint8 = img * 255
-        #cv2.imwrite('../res/datasets/REDS/out/test/'+str(count)+'.png', cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
-        cv2.imwrite('../res/datasets/REDS/out/test/'+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
-        count += 1
-        print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
-    '''
-
-    out = '../res/datasets/REDS/out/test/'
-
-    if action == 1:
-        Path(out+'folder/').mkdir(parents=True, exist_ok=True)
-
+        '''
+        pred = model.predict(test_val_generator, steps=validation_steps, batch_size=batch_size)
+    
         count = 0
-        for batch in test_val_generator:
-            p = model(batch)
-            imguint8 = np.squeeze(p.numpy()*255, axis=0)
-            cv2.imwrite(out+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+        for img in pred:
+            imguint8 = img * 255
+            #cv2.imwrite('../res/datasets/REDS/out/test/'+str(count)+'.png', cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+            cv2.imwrite('../res/datasets/REDS/out/test/'+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
             count += 1
             print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
+        '''
 
-    if action == 2:
-        original_path = reds_val_sharp+'folder/'
-        deblurred_path = out+'folder/'
-        a_m, a_p, a_s = avg_metric(original_path, deblurred_path)
-        print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))
+        out = '../res/datasets/REDS/out/val/'
 
-    '''
-    val_score = model.evaluate_generator(val_generator, steps_per_epoch["val"])
-    test_score = model.evaluate_generator(test_generator, steps_per_epoch["test"])
-    predict = model.predict_generator(test_generator, steps=steps_per_epoch["test"])
-    '''
+        if action == 1:
+            Path(out+'folder/').mkdir(parents=True, exist_ok=True)
+
+            count = 0
+            for batch in test_val_generator:
+                p = model(batch)
+                imguint8 = np.squeeze(p.numpy()*255, axis=0)
+                cv2.imwrite(out+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+                count += 1
+                print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
+
+        if action == 2:
+            original_path = reds_val_sharp+'folder/'
+            deblurred_path = out+'folder/'
+            a_m, a_p, a_s = avg_metric(original_path, deblurred_path)
+            print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))
+
+        '''
+        val_score = model.evaluate_generator(val_generator, steps_per_epoch["val"])
+        test_score = model.evaluate_generator(test_generator, steps_per_epoch["test"])
+        predict = model.predict_generator(test_generator, steps=steps_per_epoch["test"])
+        '''
+    else:
+        test_steps = len(test_blur_generator) // batch_size
+
+        out = '../res/datasets/cifar-10/saved/out/test/folder/'
+
+        if action >= 1:
+            Path(out).mkdir(parents=True, exist_ok=True)
+            sharp = []
+            blur = []
+            deblur = []
+
+            count = 0
+            for batch in test_generator:
+                p = model(batch)  # TODO1 multiprocessing
+                imguint8 = p.numpy()*255
+                sharp.extend(batch[0]*255)
+                blur.extend(batch[1]*255)
+                deblur.extend(imguint8)
+
+                if False:
+                    for i in range(len(imguint8)):
+                        cv2.imwrite(out+str(count+i)+'.png', imguint8[i])
+
+                count += len(imguint8)
+                print('Predicted {}/10000'.format(count))
+
+                if count >= 10000:
+                    break
+
+            sharp = np.array(sharp)
+            blur = np.array(blur)
+            deblur = np.array(deblur)
+
+            a_m, a_p, a_s = avg_metric_arr(sharp, deblur)
+            print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))

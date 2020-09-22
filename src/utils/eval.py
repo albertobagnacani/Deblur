@@ -32,3 +32,23 @@ def avg_metric(original_path, test_path):  # TODO1 multiprocessing
     avg_ssim = sum_ssim/len(files_orig)
 
     return avg_mse, avg_psnr, avg_ssim
+
+def avg_metric_arr(sharp, deblur):  # TODO1 multiprocessing
+    sum_psnr = 0
+    sum_mse = 0
+    sum_ssim = 0
+
+    count = 0
+    for orig, deb in zip(sharp, deblur):
+        sum_psnr += peak_signal_noise_ratio(orig, deb, data_range=255.0)
+        sum_mse += mean_squared_error(orig, deb)
+        sum_ssim += structural_similarity(orig, deb, multichannel=True)
+
+        count += 1
+        print('Analyzed: {}/{}'.format(count, len(sharp)))
+
+    avg_psnr = sum_psnr/len(sharp)
+    avg_mse = sum_mse/len(sharp)
+    avg_ssim = sum_ssim/len(sharp)
+
+    return avg_mse, avg_psnr, avg_ssim
