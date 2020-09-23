@@ -19,8 +19,10 @@ image_size = 32
 
 def unpickle(file):
     """
-    :param file:
-    :return:
+    Unpickle a pickled dict.
+
+    :param file: Path to the pickled file
+    :return: unpickled (dict): Unpickled dict
     """
     with open(file, 'rb') as fo:
         d = pickle.load(fo, encoding='bytes')
@@ -29,22 +31,12 @@ def unpickle(file):
 
 def load_cifar(path):
     """
-    The cifar-10 files contains a dictionary with the following elements:
-    - data -- a 10000x3072 numpy array of uint8s. Each row of the array stores a 32x32 colour image.
-    The first 1024 entries contain the red channel values, the next 1024 the green, and the final 1024 the blue.
-    The image is stored in row-major order, so that the first 32 entries of the array are the red channel values of the
-    first row of the image.
-    - labels -- a list of 10000 numbers in the range 0-9. The number at index i indicates the label of the ith image in
-    the array data.
+    Loads the cifar dataset.
 
-    The dataset contains another file, called batches.meta. It too contains a Python dictionary object.
-    It has the following entries:
-    - label_names -- a 10-element list which gives meaningful names to the numeric labels in the labels array described
-    above. For example, label_names[0] == "airplane", label_names[1] == "automobile", etc.
-
-    :param path:
-    :return:
+    :param path: Path to the cifar dataset
+    :return: dict: for each set (train, val (not loaded here), test), the loaded images
     """
+    # List all files
     files = [f for f in listdir(path) if isfile(join(path, f)) and 'batch' in f]
     files.sort()
 
@@ -52,6 +44,7 @@ def load_cifar(path):
     test = []
     for file in files:
         filename = os.path.join(path, file)
+        # Unpickle the batch
         batch = unpickle(filename)
 
         if 'data_batch' in filename:
@@ -62,14 +55,14 @@ def load_cifar(path):
     return {'train': train, 'val': [], 'test': test}
 
 
-def blur_cifar(ds):  # TODO5 can be optimized (e.g. multiprocessing)
+def blur_cifar(ds):  # TODO1 do multiprocessing
     """
-    Applies gaussian blurring with random stdev between 0 and 3 (included).
+    Applies gaussian blurring with random stdev in [0, 3[.
 
     The saved dataset was created with seed = 42.
 
-    :param ds:
-    :return:
+    :param ds (np.array): Loaded dataset
+    :return: blurred (np.array): Blurred dataset
     """
     print('Blurring')
     result = {key: [] for key in ds}
@@ -80,28 +73,31 @@ def blur_cifar(ds):  # TODO5 can be optimized (e.g. multiprocessing)
 
             for image in entry[b'data']:
                 blurred = []  # 0 = red, 1 = green, 2 = blue
+                # Compute the random sigma
                 sigma = random.randint(min_sigma, max_sigma)
 
                 for i in range(3):
-                    img_c = np.reshape(image[channel*i:channel*(i+1)], (image_size, image_size))
+                    # For each channel, blur the image
+                    img_c = np.reshape(image[channel * i:channel * (i + 1)], (image_size, image_size))
 
                     blurred_c = np.reshape(gaussian_filter(img_c, sigma), (channel,))
                     blurred.extend(blurred_c)
 
                 tmp.append(blurred)
 
-            new_entry = deepcopy(entry)  # deepcopy is heavy
+            new_entry = deepcopy(entry)  # a bit heavy
             new_entry[b'data'] = np.array(tmp)
             result[key].append(new_entry)
 
     return result
 
 
-def reshape_cifar(ds):  # TODO5 can be optimized (e.g. multiprocessing)
+def reshape_cifar(ds):  # TODO1 do multiprocessing
     """
+    Reshape the cifar into the form (n_images, height, width, channels)
 
-    :param ds:
-    :return:
+    :param ds (np.array): Loaded dataset
+    :return: reshaped (np.array): Reshaped dataset
     """
     print('Reshaping')
     result = []
@@ -123,10 +119,11 @@ def reshape_cifar(ds):  # TODO5 can be optimized (e.g. multiprocessing)
 
 def save_cifar(ds, path):
     """
+    Save the images of cifar dataset.
 
-    :param ds:
-    :param path:
-    :return:
+    :param ds (np.array): Loaded dataset
+    :param path (string): Path where to save images
+    :return: void
     """
     count = 0
 
@@ -137,9 +134,9 @@ def save_cifar(ds, path):
 
 def reds_merge(input_path):
     """
-
-    :param input_path:
-    :return:
+    Merge all the reds scene into a single folder (flow_from_directory format)
+    :param input_path (string): Path containing the reds dataset
+    :return: void
     """
     print('Merging {}'.format(input_path))
 
@@ -155,6 +152,8 @@ def reds_merge(input_path):
             filename = os.path.join(root_n, file)
             # or move/copy to a 'merged' folder
             # shutil.move(filename, os.path.join(input_path, str(count)+".png"))
+
+            # Copy to the new folder
             shutil.copyfile(filename, os.path.join(input_path, str(count)+".png"))
 
             count += 1
@@ -162,12 +161,11 @@ def reds_merge(input_path):
         # shutil.rmtree(root_n)
 
 
-# TODO1 should do directly on reds_merge and save_cifar
 def keras_folder(paths):
     """
-
-    :param paths:
-    :return:
+    Adds a dummy folder to be compatible with the flow_from_directory (e.g. train/train_blur/folder/<list of images>).
+    :param paths (dict): dict containing for each set (train, val, test) the paths to the dataset
+    :return: new_paths (dict): updated paths
     """
     print('Moving')
 
@@ -175,12 +173,15 @@ def keras_folder(paths):
 
     for key in paths:
         p = paths[key]
+        # Add the 'folder/' directory
         new_p = p + 'folder/'
 
+        # Create the folder if not existing
         Path(new_p).mkdir(parents=True, exist_ok=True)
 
         files = [f for f in listdir(p) if isfile(join(p, f))]
         for f in files:
+            # Move to the new folder
             shutil.move(p + f, new_p)
 
         res[key] = new_p

@@ -1,6 +1,5 @@
 from os import listdir
 from os.path import isfile, join
-from pathlib import Path
 
 import tensorflow as tf
 from numpy import float32
@@ -9,27 +8,38 @@ from numpy import float32
 def select_patch(sharp, blur, patch_size_x, patch_size_y):
     """
     Select a patch on both sharp and blur images at the same localization.
-    Args:
+
+    :param:
         sharp (tf.Tensor): Tensor for the sharp image
         blur (tf.Tensor): Tensor for the blur image
         patch_size_x (int): Size of patch along x axis
         patch_size_y (int): Size of patch along y axis
-    Returns:
-        Tuple[tf.Tensor, tf.Tensor]: Tuple of tensors with shape (patch_size_x, patch_size_y, 3)
+    :returns:
+        patch (Tuple[tf.Tensor, tf.Tensor]): Tuple of tensors with shape (patch_size_x, patch_size_y, 3)
     """
     stack = tf.stack([sharp, blur], axis=0)
     patches = tf.image.random_crop(stack, size=[2, patch_size_x, patch_size_y, 3])
-    return (patches[0], patches[1])
+    return patches[0], patches[1]
 
 
 class TensorflowDatasetLoader:
-    def __init__(self, dataset_path, batch_size=8, patch_size=(256, 256), n_images=None):
+    """
+    Class to load dataset using the TensorFlow Data API.
+    """
+    def __init__(self, dataset_path, batch_size=8, patch_size=(256, 256)):
+        """
+        Class constructor.
+
+        :param dataset_path (string): Path to the dataset
+        :param batch_size (int): batch size
+        :param patch_size (Tuple[int, int]): dimension of the patch
+        """
         p = dataset_path+'sharp/'
         # List all images paths
         # sharp_images_paths = [str(path) for path in Path(dataset_path).glob("*/sharp/*.png")]
         sharp_images_paths = [p+f for f in listdir(p) if isfile(join(p, f))]
-        if n_images is not None:
-            sharp_images_paths = sharp_images_paths[0:n_images]
+        # if n_images is not None:
+        #     sharp_images_paths = sharp_images_paths[0:n_images]
 
         # Generate corresponding blurred images paths
         blur_images_paths = [path.replace("sharp", "blur") for path in sharp_images_paths]
@@ -65,6 +75,13 @@ class TensorflowDatasetLoader:
 
     @staticmethod
     def load_image(image_path, dtype):
+        """
+        Loads an image.
+
+        :param image_path (string): Path to the image
+        :param dtype (dtype): dtype of the loaded image
+        :return:
+        """
         image = tf.io.read_file(image_path)
         image = tf.image.decode_png(image, channels=3)
         image = tf.image.convert_image_dtype(image, dtype)
