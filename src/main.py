@@ -7,9 +7,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 import os
+# Run TF on CPU
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import tensorflow as tf
-from skimage.metrics import mean_squared_error
 
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
@@ -17,9 +17,10 @@ from tensorflow.keras import Input
 from tensorflow.keras.callbacks import TensorBoard
 from tensorflow.keras.layers import Conv2D, Conv2DTranspose, Add
 from tensorflow.keras.models import Model
-from tensorflow.python.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
+from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
+from tensorflow.keras.optimizers.schedules import PolynomialDecay
+from tensorflow.keras.callbacks import LearningRateScheduler
 
-from dataset.TensorflowDatasetLoader import TensorflowDatasetLoader
 from utils.eval import avg_metric, avg_metric_loaded_array
 from utils.dataset import load_cifar, blur_cifar, reshape_cifar, unpickle
 
@@ -139,9 +140,6 @@ reds = {'train_s': reds_train_sharp, 'train_b': reds_train_blur, 'val_s': reds_v
 # for key in reds:
 #     reds_merge(reds[k])
 
-if 'reds' in task:
-    validation_split = 0
-
 # Create the datagens
 train_datagen = ImageDataGenerator(rescale=rescale, validation_split=validation_split)
 test_datagen = ImageDataGenerator(rescale=rescale)
@@ -152,20 +150,20 @@ if 'reds' in task:
     train_sharp_generator = train_datagen.flow_from_directory(
             reds['train_s'],
             target_size=target_size,
-            batch_size=batch_size, class_mode=class_mode, seed=seed)
+            batch_size=batch_size, class_mode=class_mode, seed=seed, subset='training')
     train_blur_generator = train_datagen.flow_from_directory(
             reds['train_b'],
             target_size=target_size,
-            batch_size=batch_size, class_mode=class_mode, seed=seed)  # subset='training'
+            batch_size=batch_size, class_mode=class_mode, seed=seed, subset='training')
 
     val_sharp_generator = train_datagen.flow_from_directory(
-            reds['val_s'],
+            reds['train_s'],
             target_size=target_size,
-            batch_size=batch_size, class_mode=class_mode, seed=seed)
+            batch_size=batch_size, class_mode=class_mode, seed=seed, subset='validation')
     val_blur_generator = train_datagen.flow_from_directory(
-            reds['val_b'],
+            reds['train_b'],
             target_size=target_size,
-            batch_size=batch_size, class_mode=class_mode, seed=seed)
+            batch_size=batch_size, class_mode=class_mode, seed=seed, subset='validation')
 
     # Validation generator used for testing
     test_val_sharp_generator = train_datagen.flow_from_directory(
@@ -268,7 +266,7 @@ def combine_generators_no_random_crop(sharp_generator, blur_generator):
         yield res
 
 
-# Create the generators, withouts crops for the cifar task (and the reds test_val)
+# Create the generators, without crops for the cifar task (and the reds test_val)
 if 'reds' in task:
     train_generator = combine_generators(train_sharp_generator, train_blur_generator)
     validation_generator = combine_generators(val_sharp_generator, val_blur_generator)
@@ -277,6 +275,14 @@ else:
     train_generator = combine_generators_no_random_crop(train_sharp_generator, train_blur_generator)
     validation_generator = combine_generators_no_random_crop(val_sharp_generator, val_blur_generator)
     test_generator = combine_generators_no_random_crop(test_sharp_generator, test_blur_generator)
+
+# Define the train and validation steps
+if 'reds' in task:
+    train_steps = train_sharp_generator.samples // batch_size
+    validation_steps = val_sharp_generator.samples // batch_size
+else:
+    train_steps = len(train_sharp_generator)
+    validation_steps = len(val_sharp_generator)
 
 
 # Define the NN model
@@ -309,8 +315,6 @@ def generator(inp, x_unwrap=[]):
     channels = 3
     n_levels = 3
     starting_scale = 0.5
-
-    # b, h, w, c = inp.get_shape()
 
     # If training on reds, the shape is (256, 256) (crop)
     # If predicting on reds, the shape is the original one (720, 1280)
@@ -405,19 +409,6 @@ def custom_loss(x_unwrap, img_gt):
     return loss_total
 
 
-'''
-# PolynomialDecay definition
-data_size = train_sharp_generator.samples // batch_size
-max_steps = int(epochs * data_size)
-
-END_LR = 1e-5
-POWER = 2
-LR = PolynomialDecay(initial_learning_rate=initial_lr, decay_steps=max_steps, end_learning_rate=END_LR, power=POWER)
-'''
-# Define the optimizer
-OPTIMIZER = Adam(lr=initial_lr)
-
-
 # Define some metrics
 def log10(x):
     """
@@ -471,16 +462,14 @@ model = Model(inputs=[input_sharp, input_blur], outputs=output)
 # x_unwrap = generator(input_blur)
 # model = Model(inputs=[input_sharp, input_blur], outputs=x_unwrap)
 
-METRICS = None
-# METRICS = [custom_mse(x_unwrap, input_sharp)]
-
 # Add custom loss and metric
 model.add_loss(custom_loss(x_unwrap, input_sharp))
 # Since training happens on batch of images we will use the mean of SSIM values of all the images in the batch as the
 # loss value -> batch_mean(mean_scales_mse)
 model.add_metric(custom_psnr(x_unwrap, input_sharp), name='mean_scales_psnr', aggregation='mean')
 # Compile the model
-model.compile(optimizer=OPTIMIZER, metrics=METRICS)
+OPTIMIZER = Adam(lr=initial_lr)
+model.compile(optimizer=OPTIMIZER)
 
 # Print the summary
 # print(model.summary())
@@ -497,25 +486,25 @@ save_weights_only = False
 # Path where to save the checkpoints
 checkpoint_filepath = '../res/models/'+minor_path+'/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
 
-# Define some callbacks
+# PolynomialDecay definition
+data_size = train_sharp_generator.samples // batch_size
+max_steps = int(epochs * data_size)
+
+end_lr = 0.0
+power = 0.3
+pd = PolynomialDecay(initial_learning_rate=initial_lr, decay_steps=max_steps, end_learning_rate=end_lr, power=power)
+
 rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-5)
+lrs = LearningRateScheduler(pd)
 es = EarlyStopping(monitor='loss', patience=3)
 mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=False,
                      save_weights_only=save_weights_only, period=mc_period)
 
-callbacks = [tensorboard_callback, mc, rlrop]
+callbacks = [tensorboard_callback, mc, lrs]
 
-# print('Using GPU: {}'.format(tf.test.is_gpu_available()))
 # Check if tf is using GPU
+# print('Using GPU: {}'.format(tf.test.is_gpu_available()))
 print(tf.config.list_physical_devices('GPU'))
-
-# Define the train and validation steps
-if 'reds' in task:
-    train_steps = train_sharp_generator.samples // batch_size
-    validation_steps = val_sharp_generator.samples // batch_size
-else:
-    train_steps = len(train_sharp_generator)
-    validation_steps = len(val_sharp_generator)
 
 # Restart the training from a model (weights) or load a model (weights) to make predictions
 if load_epoch != 0:
@@ -526,30 +515,17 @@ if load_epoch != 0:
 if action == 0:  # Train action
     # Train
     history = model.fit(train_generator, epochs=epochs, steps_per_epoch=train_steps, callbacks=callbacks,
-                        validation_data=validation_generator, validation_steps=validation_steps)
-    # history = model.fit(TensorflowDatasetLoader('../res/datasets/REDS/train_b/', batch_size=batch_size).dataset,
-    #                     epochs=epochs, steps_per_epoch=2, callbacks=callbacks)
+                        validation_data=validation_generator, validation_steps=validation_steps,
+                        initial_epoch=load_epoch)
 
     # Save the model/weights
-    model.save('../res/models/'+minor_path+'/final_model.h5')  # model = load_model('model.h5')
-    model.save_weights('../res/models/'+minor_path+'/final_weights.h5')  # model.load_weights('weights.h5')
+    model.save('../res/models/'+minor_path+'/final_model.h5')
+    model.save_weights('../res/models/'+minor_path+'/final_weights.h5')
     print('Saved model/weights!')
 else:  # Predict/evaluate
     if 'reds' in task:
         names = test_val_sharp_generator.filenames
         names = iter(names)
-
-        '''
-        pred = model.predict(test_val_generator, steps=validation_steps, batch_size=batch_size)
-    
-        count = 0
-        for img in pred:
-            imguint8 = img * 255
-            #cv2.imwrite('../res/datasets/REDS/out/test/'+str(count)+'.png', cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
-            cv2.imwrite('../res/datasets/REDS/out/test/'+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
-            count += 1
-            print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
-        '''
 
         # Path where to save predicted images
         out = '../res/datasets/REDS/out/val/'

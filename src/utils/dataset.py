@@ -12,7 +12,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 min_sigma = 0
-max_sigma = 3
+max_sigma = 3  # [0,3]
 channel = 1024
 image_size = 32
 
@@ -57,7 +57,7 @@ def load_cifar(path):
 
 def blur_cifar(ds):  # TODO1 do multiprocessing
     """
-    Applies gaussian blurring with random stdev in [0, 3[.
+    Applies gaussian blurring with random stdev in [0, 3].
 
     The saved dataset was created with seed = 42.
 
@@ -81,6 +81,7 @@ def blur_cifar(ds):  # TODO1 do multiprocessing
                     img_c = np.reshape(image[channel * i:channel * (i + 1)], (image_size, image_size))
 
                     blurred_c = np.reshape(gaussian_filter(img_c, sigma), (channel,))
+                    # blurred_c = np.reshape(cv2.GaussianBlur(src=img_c, sigmaX=sigma), (channel,)) # TODO1 check
                     blurred.extend(blurred_c)
 
                 tmp.append(blurred)
