@@ -49,7 +49,7 @@ reds_val_blur = reds_path + 'val/val_blur/'
 reds_test_blur = reds_path + 'test/test_blur/'
 
 # Path to the parameters used to execute
-json_path = 'params.json'
+json_path = 'params.json'  # TODO1 set up argparse
 
 # Define some parameters/hyper-parameters
 seed = 42
@@ -57,8 +57,21 @@ batch_size = 8
 class_mode = None
 epochs = 50
 initial_lr = 1e-4
+# Number of image channels, number of scale levels, starting scale
+channels = 3
+n_levels = 3
+starting_scale = 0.5
 # Model checkpoint period
 mc_period = 1
+# Callbacks parameters
+end_lr = 1e-6
+power = 0.3
+monitor_rlrop = 'val_loss'
+factor_rlrop = 0.2
+patience_rlrop = 5
+min_lr_rlrop = 1e-5
+monitor_es = 'loss'
+patience_es = 3
 
 rescale = 1./255
 validation_split = 0.1
@@ -79,6 +92,25 @@ with open(json_path) as json_file:
     mc_period = data['mc_period']
     subset = data['subset']
     action = data['action']
+
+# minor_path can be 'reds' or 'cifar'; it's used to create the paths where to save things (e.g. logs, ...)
+task_path = 'reds' if 'reds' in task else 'cifar'
+
+# Instantiate a TensorBoard callback and the path where to save the logs
+base_logs_path = '../res/logs/'
+log_dir = base_logs_path+task_path+'/'+task_path + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+
+# Path where to save the checkpoints
+base_model_path = '../res/models/'+task_path
+checkpoint_filepath = base_model_path+'/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
+
+# Path where to save/load the model/weights
+model_weights_path = base_model_path+'/model-'+str(load_epoch)+'.h5'
+final_model_path = base_model_path
+
+# Path where to save predictions
+out_reds = '../res/datasets/REDS/out/val/'
+out_cifar = '../res/datasets/cifar-10/saved/out/test/folder/'
 
 # Different target size depending on the task to perform (work on 'reds' or 'cifar' dataset)
 if 'reds' in task:
@@ -311,11 +343,6 @@ def generator(inp, x_unwrap=[]):
     :return: inp_pred (tf.keras.layers.Layer): last layer of the network (see relation)
     """
 
-    # Number of image channels, number of scale levels, starting scale
-    channels = 3
-    n_levels = 3
-    starting_scale = 0.5
-
     # If training on reds, the shape is (256, 256) (crop)
     # If predicting on reds, the shape is the original one (720, 1280)
     # If training/predicting on cifar, the shape is the original one (32, 32)
@@ -397,7 +424,6 @@ def custom_loss(x_unwrap, img_gt):
     :param img_gt (tf.keras.layers.Layer): GT input (sharp images)
     :return: loss (float): loss value
     """
-    n_levels = 3
 
     loss_total = 0
     for i in range(n_levels):
@@ -472,35 +498,34 @@ OPTIMIZER = Adam(lr=initial_lr)
 model.compile(optimizer=OPTIMIZER)
 
 # Print the summary
-# print(model.summary())
+print(model.summary())
 
-# minor_path can be 'reds' or 'cifar'; it's used to create the paths where to save things (e.g. logs, ...)
-minor_path = 'reds' if 'reds' in task else 'cifar'
-
-# Instantiate a TensorBoard callback and the path where to save the logs
-log_dir = '../res/logs/'+minor_path+'/'+minor_path + datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+# Callbacks
 tensorboard_callback = TensorBoard(log_dir=log_dir)  # , histogram_freq=1, profile_batch='1')
 
 save_weights_only = False
 
-# Path where to save the checkpoints
-checkpoint_filepath = '../res/models/'+minor_path+'/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
-
 # PolynomialDecay definition
-data_size = train_sharp_generator.samples // batch_size
+if 'reds' in task:
+    data_size = train_sharp_generator.samples // batch_size
+else:
+    data_size = len(train_sharp_generator)
 max_steps = int(epochs * data_size)
 
-end_lr = 0.0
-power = 0.3
 pd = PolynomialDecay(initial_learning_rate=initial_lr, decay_steps=max_steps, end_learning_rate=end_lr, power=power)
 
-rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-5)
+rlrop = ReduceLROnPlateau(monitor=monitor_rlrop, factor=factor_rlrop, patience=patience_rlrop, min_lr=min_lr_rlrop)
 lrs = LearningRateScheduler(pd)
-es = EarlyStopping(monitor='loss', patience=3)
+es = EarlyStopping(monitor=monitor_es, patience=patience_es)
 mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best_only=False,
                      save_weights_only=save_weights_only, period=mc_period)
 
-callbacks = [tensorboard_callback, mc, lrs]
+callbacks = [tensorboard_callback, mc]
+
+if 'reds' in task:
+    callbacks.append(lrs)
+else:
+    callbacks.append(rlrop)
 
 # Check if tf is using GPU
 # print('Using GPU: {}'.format(tf.test.is_gpu_available()))
@@ -508,8 +533,8 @@ print(tf.config.list_physical_devices('GPU'))
 
 # Restart the training from a model (weights) or load a model (weights) to make predictions
 if load_epoch != 0:
-    model.load_weights('../res/models/'+minor_path+'/model-'+str(load_epoch)+'.h5')
-    # model = load_model('../res/models/model-'+str(load_epoch)+'.h5')
+    model.load_weights(model_weights_path)
+    # model = load_model(model_weights_path)
     print('Loaded model/weights!')
 
 if action == 0:  # Train action
@@ -519,16 +544,16 @@ if action == 0:  # Train action
                         initial_epoch=load_epoch)
 
     # Save the model/weights
-    model.save('../res/models/'+minor_path+'/final_model.h5')
-    model.save_weights('../res/models/'+minor_path+'/final_weights.h5')
+    model.save(final_model_path+'/final_model.h5')
+    model.save_weights(final_model_path+'/final_weights.h5')
     print('Saved model/weights!')
-else:  # Predict/evaluate
+else:  # Predict/evaluate # TODO1 do function
     if 'reds' in task:
         names = test_val_sharp_generator.filenames
         names = iter(names)
 
         # Path where to save predicted images
-        out = '../res/datasets/REDS/out/val/'
+        out = out_reds
 
         if action == 1:  # Predict
             Path(out+'folder/').mkdir(parents=True, exist_ok=True)
@@ -550,10 +575,8 @@ else:  # Predict/evaluate
             a_m, a_p, a_s = avg_metric(original_path, deblurred_path)
             print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))
     else:
-        test_steps = len(test_blur_generator) // batch_size
-
         # Path where to save the images
-        out = '../res/datasets/cifar-10/saved/out/test/folder/'
+        out = out_cifar
 
         if action >= 1:
             Path(out).mkdir(parents=True, exist_ok=True)
@@ -577,7 +600,7 @@ else:  # Predict/evaluate
                 count += len(imguint8)
                 print('Predicted {}/10000'.format(count))
 
-                if count >= 10000:
+                if count >= 10000:  # Infinite generator
                     break
 
             sharp = np.array(sharp)

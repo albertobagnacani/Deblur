@@ -1,4 +1,4 @@
-name: deblur
+name: deblur2
 channels:
     - conda-forge
 dependencies:
@@ -6,7 +6,4 @@ dependencies:
   - scikit-image
   - numpy
   - scipy
-  - opencv-python
-# TODO
-# opencv-python not on conda
-# tensorboard?
+  - opencv
