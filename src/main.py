@@ -510,7 +510,7 @@ if 'reds' in task:
     data_size = train_sharp_generator.samples // batch_size
 else:
     data_size = len(train_sharp_generator)
-max_steps = int(epochs * data_size)
+max_steps = int((epochs-load_epoch) * data_size)
 
 pd = PolynomialDecay(initial_learning_rate=initial_lr, decay_steps=max_steps, end_learning_rate=end_lr, power=power)
 
@@ -559,14 +559,21 @@ else:  # Predict/evaluate # TODO1 do function
             Path(out+'folder/').mkdir(parents=True, exist_ok=True)
 
             count = 0
+            sum_time = 0
             for batch in test_val_generator:
                 # Make prediction
+                a = datetime.datetime.now()
                 p = model(batch)
+                b = datetime.datetime.now()
+                ms = int((b - a).total_seconds() * 1000)
+                sum_time += ms
                 imguint8 = np.squeeze(p.numpy()*255, axis=0)
                 # Save image
-                cv2.imwrite(out+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))
+                cv2.imwrite(out+next(names), cv2.cvtColor(imguint8, cv2.COLOR_RGB2BGR))  # TODO1 error on last image
                 count += 1
                 print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
+
+            avg_time = sum_time/count
 
         if action == 2:  # Evaluate
             original_path = reds_val_sharp+'folder/'
@@ -585,9 +592,14 @@ else:  # Predict/evaluate # TODO1 do function
             deblur = []
 
             count = 0
+            sum_time = 0
             for batch in test_generator:
                 # Make prediction
+                a = datetime.datetime.now()
                 p = model(batch)  # TODO1 do multiprocessing, if possible
+                b = datetime.datetime.now()
+                ms = int((b - a).total_seconds() * 1000)
+                sum_time += ms
                 imguint8 = p.numpy()*255
                 sharp.extend(batch[0]*255)
                 blur.extend(batch[1]*255)
@@ -602,6 +614,8 @@ else:  # Predict/evaluate # TODO1 do function
 
                 if count >= 10000:  # Infinite generator
                     break
+
+            avg_time = sum_time/count
 
             sharp = np.array(sharp)
             blur = np.array(blur)
