@@ -105,7 +105,7 @@ base_model_path = '../res/models/'+task_path
 checkpoint_filepath = base_model_path+'/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
 
 # Path where to save/load the model/weights
-model_weights_path = base_model_path+'/model-'+str(load_epoch)+'.h5'
+model_weights_path = base_model_path+'/model-'+task_path+'-'+str(load_epoch)+'.h5'
 final_model_path = base_model_path
 
 # Path where to save predictions

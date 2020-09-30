@@ -1,0 +1,11 @@
+{
+  "task": "reds",
+  "epochs": 100,
+  "batch_size": 8,
+  "initial_lr": 1e-4,
+  "load_epoch": 100,
+  "action": 1,
+  "subset": false,
+  "seed": 42,
+  "mc_period": 1
+}
