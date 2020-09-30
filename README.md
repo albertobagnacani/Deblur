@@ -30,3 +30,7 @@ false otherwise
 - "seed": int. Seed
 - "mc_period": int. ModelCheckpoint saving period (frequency in epochs of the the model/weights saving). If set to 1, 
 the model/weights are saved at each epoch
+
+# Weights
+The model (weights) can be found in the `res/models/cifar/model-100.h5` or `res/models/reds/model-100.h5`, for the 
+CIFAR-10 and REDS datasets, respectively.

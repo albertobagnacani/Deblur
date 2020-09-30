@@ -75,7 +75,6 @@ venv/
 
 res/datasets
 res/logs
-res/models
+res/models/logs.txt
 
-src/params.json
 src/notes.txt
