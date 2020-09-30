@@ -36,6 +36,7 @@ def load_cifar(path):
     :param path: Path to the cifar dataset
     :return: dict: for each set (train, val (not loaded here), test), the loaded images
     """
+    print('Loading CIFAR-10')
     # List all files
     files = [f for f in listdir(path) if isfile(join(path, f)) and 'batch' in f]
     files.sort()
@@ -64,7 +65,7 @@ def blur_cifar(ds):  # TODO1 do multiprocessing
     :param ds (np.array): Loaded dataset
     :return: blurred (np.array): Blurred dataset
     """
-    print('Blurring')
+    print('Blurring CIFAR-10')
     result = {key: [] for key in ds}
 
     for key in ds:
@@ -100,7 +101,7 @@ def reshape_cifar(ds):  # TODO1 do multiprocessing
     :param ds (np.array): Loaded dataset
     :return: reshaped (np.array): Reshaped dataset
     """
-    print('Reshaping')
+    print('Reshaping CIFAR-10')
     result = []
 
     for entry in ds:
@@ -126,6 +127,7 @@ def save_cifar(ds, path):
     :param path (string): Path where to save images
     :return: void
     """
+    print('Saving updated CIFAR-10 images')
     count = 0
 
     for image in ds:
@@ -139,7 +141,7 @@ def reds_merge(input_path):
     :param input_path (string): Path containing the reds dataset
     :return: void
     """
-    print('Merging {}'.format(input_path))
+    print('Merging REDS {}'.format(input_path))
 
     root, dirs, files = next(os.walk(input_path))
     dirs.sort()
@@ -168,7 +170,7 @@ def keras_folder(paths):
     :param paths (dict): dict containing for each set (train, val, test) the paths to the dataset
     :return: new_paths (dict): updated paths
     """
-    print('Moving')
+    print('Moving images into the folder needed by the flow_from_directory')
 
     res = {key: '' for key in paths}
 

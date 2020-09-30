@@ -22,7 +22,7 @@ from tensorflow.keras.optimizers.schedules import PolynomialDecay
 from tensorflow.keras.callbacks import LearningRateScheduler
 
 from utils.eval import avg_metric, avg_metric_loaded_array
-from utils.dataset import load_cifar, blur_cifar, reshape_cifar, unpickle
+from utils.dataset import load_cifar, blur_cifar, reshape_cifar, unpickle, keras_folder, reds_merge
 
 # Avoids memory overflow
 tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0], True)
@@ -47,6 +47,7 @@ reds_train_blur = reds_path + 'train/train_blur/'
 reds_val_sharp = reds_path + 'val/val_sharp/'
 reds_val_blur = reds_path + 'val/val_blur/'
 reds_test_blur = reds_path + 'test/test_blur/'
+reds_train_sharp_keras = reds_train_sharp+'folder/'
 
 # Path to the parameters used to execute
 json_path = 'params.json'  # TODO1 set up argparse
@@ -132,7 +133,7 @@ random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
 
-# If the cifar dataset does not exists, create it: load, reshape and blur the datasets
+# If the cifar needed structure does not exists, create it: load, reshape and blur the datasets
 if not os.path.exists(cifar_train_path):
     dataset = load_cifar(cifar_path)
     ds_blurred = blur_cifar(dataset)
@@ -167,10 +168,13 @@ for key in cifar_saved_paths:
 reds = {'train_s': reds_train_sharp, 'train_b': reds_train_blur, 'val_s': reds_val_sharp, 'val_b': reds_val_blur,
         'test_b': reds_test_blur}
 
-# reds = keras_folder(reds)
+# If the reds needed structure does not exists, create it: create a 'folder' sub_folder (needed for the
+# flow_from_directory) and merge all the folders (scenes) into a single one
+if not os.path.exists(reds_train_sharp_keras):
+    reds = keras_folder(reds)
 
-# for key in reds:
-#     reds_merge(reds[k])
+    for key in reds:
+        reds_merge(reds[k])
 
 # Create the datagens
 train_datagen = ImageDataGenerator(rescale=rescale, validation_split=validation_split)
@@ -587,6 +591,7 @@ else:  # Predict/evaluate # TODO1 do function
 
         if action >= 1:
             Path(out).mkdir(parents=True, exist_ok=True)
+
             sharp = []
             blur = []
             deblur = []
