@@ -32,7 +32,8 @@ Move the downloaded files in the following paths (be aware to respect this namin
 ```
 python3 src/main.py
 ```
-A subset of the (hyper)parameters are defined in the `params.json` file.
+A subset of the (hyper)parameters are defined in the `params.json` file. 
+Note that this file is actually used by the `main.py` script.
 
 ## params.json file
 The `src/params.json` contains a list of (hyper)parameters to run the script:
