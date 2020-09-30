@@ -147,6 +147,7 @@ if not os.path.exists(cifar_train_path):
 
         Path(cifar_path_modified).mkdir(parents=True, exist_ok=True)
 
+        print('Saving the new CIFAR-10 dataset')
         # Save the unpdated datasets
         with open(path_c, 'wb') as ff:
             pickle.dump(reshaped_ds, ff)
@@ -165,16 +166,16 @@ for key in cifar_saved_paths:
 '''
 
 # Those are paths
-reds = {'train_s': reds_train_sharp, 'train_b': reds_train_blur, 'val_s': reds_val_sharp, 'val_b': reds_val_blur,
-        'test_b': reds_test_blur}
+reds = {'train_s': reds_train_sharp, 'train_b': reds_train_blur, 'val_s': reds_val_sharp, 'val_b': reds_val_blur}
+# 'test_b': reds_test_blur}
 
 # If the reds needed structure does not exists, create it: create a 'folder' sub_folder (needed for the
 # flow_from_directory) and merge all the folders (scenes) into a single one
 if not os.path.exists(reds_train_sharp_keras):
-    reds = keras_folder(reds)
+    reds2 = keras_folder(reds)
 
-    for key in reds:
-        reds_merge(reds[k])
+    for key in reds2:
+        reds_merge(reds2[key])  # TODO1 this one can actually be avoided
 
 # Create the datagens
 train_datagen = ImageDataGenerator(rescale=rescale, validation_split=validation_split)
@@ -211,10 +212,10 @@ if 'reds' in task:
             target_size=target_size,
             batch_size=1, class_mode=class_mode, seed=seed, shuffle=False)
 
-    test_generator = test_datagen.flow_from_directory(
+    '''test_generator = test_datagen.flow_from_directory(
             reds['test_b'],
             target_size=target_size,
-            batch_size=batch_size, class_mode=class_mode, seed=seed)
+            batch_size=batch_size, class_mode=class_mode, seed=seed)'''
 else:
     train_sharp_generator = train_datagen.flow(
             x=cifar['train'],
@@ -502,7 +503,7 @@ OPTIMIZER = Adam(lr=initial_lr)
 model.compile(optimizer=OPTIMIZER)
 
 # Print the summary
-print(model.summary())
+# print(model.summary())
 
 # Callbacks
 tensorboard_callback = TensorBoard(log_dir=log_dir)  # , histogram_freq=1, profile_batch='1')

@@ -1,12 +1,21 @@
 # Scale-recurrent Network for Deep Image Deblurring
 For the project details, see `Relation_Bagnacani.pdf`
 
-[comment]: <> (
+<!--
+For the project details, see 
+https://docs.google.com/document/d/1LiOAaUSIEWBpxRx6_HTnsfB5-Y9ZCqZPKQxvQJNx9RQ/edit?usp=sharing
+-->
+
+<!--
 # Download the project
 ```
 git clone https://github.com/albertobagnacani/Deblur.git
 ```
-)
+and cd it:
+```
+cd Deblur/
+```
+-->
 
 # Deployment
 Run
@@ -39,9 +48,12 @@ mv cifar-10-batches-py/* res/datasets/cifar-10/
 ```
 
 ## REDS
-Create the directory that will contain the dataset:
+Create the directories that will contain the dataset:
 ```
-mkdir -p res/datasets/reds/
+mkdir -p res/datasets/REDS/train/train_sharp
+mkdir -p res/datasets/REDS/train/train_blur
+mkdir -p res/datasets/REDS/val/val_sharp
+mkdir -p res/datasets/REDS/val/val_blur
 ```
 
 Download the following files from https://seungjunnah.github.io/Datasets/reds.html and then unzip them:
@@ -52,10 +64,10 @@ Download the following files from https://seungjunnah.github.io/Datasets/reds.ht
 
 Move the folders inside the dataset folder:
 ```
-mv train_sharp res/datasets/reds/train
-mv train_blur res/datasets/reds/train
-mv val_sharp res/datasets/reds/val
-mv val_blur res/datasets/reds/val
+mv train_sharp/* res/datasets/REDS/train/train_sharp
+mv train_blur/* res/datasets/REDS/train/train_blur
+mv val_sharp/* res/datasets/REDS/val/val_sharp
+mv val_blur/* res/datasets/REDS/val/val_blur
 ```
 
 # Download weights
@@ -74,9 +86,15 @@ Move the downloaded files in the following paths (be aware to respect this namin
 - CIFAR-10: `res/models/cifar/model-cifar-100.h5`
 
 # Run
+Enter the `src` folder:
 ```
-python3 src/main.py
+cd src
 ```
+and run the main:
+```
+python3 main.py
+```
+
 A subset of the (hyper)parameters are defined in the `src/params.json` file. 
 Note that this file is actually used by the `src/main.py` script.
 
@@ -98,6 +116,9 @@ false otherwise
 - "seed": int. Seed
 - "mc_period": int. ModelCheckpoint saving period (frequency in epochs of the the model/weights saving). If set to 1, 
 the model/weights are saved at each epoch
+
+The REDS test set (the downloaded validation set is actually used as a test set) predictions can be found in the 
+`res/datasets/REDS/out/val/folder/`
 
 ### Examples for params.json file
 For training a new model, set:

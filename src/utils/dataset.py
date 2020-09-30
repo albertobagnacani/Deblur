@@ -161,7 +161,7 @@ def reds_merge(input_path):
 
             count += 1
 
-        # shutil.rmtree(root_n)
+        shutil.rmtree(root_n)
 
 
 def keras_folder(paths):
@@ -179,10 +179,10 @@ def keras_folder(paths):
         # Add the 'folder/' directory
         new_p = p + 'folder/'
 
+        files = [f for f in listdir(p)]
+
         # Create the folder if not existing
         Path(new_p).mkdir(parents=True, exist_ok=True)
-
-        files = [f for f in listdir(p) if isfile(join(p, f))]
         for f in files:
             # Move to the new folder
             shutil.move(p + f, new_p)

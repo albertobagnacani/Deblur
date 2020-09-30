@@ -1,4 +1,4 @@
-name: deblur2
+name: deblur
 channels:
     - conda-forge
 dependencies:
