@@ -70,6 +70,13 @@ mv val_sharp/* res/datasets/REDS/val/val_sharp
 mv val_blur/* res/datasets/REDS/val/val_blur
 ```
 
+The structure should be:
+```
+res/datasets/reds/train/train_sharp/000
+res/datasets/reds/train/train_sharp/001
+...
+```
+
 # Download weights
 Create the directories that will contain the weights:
 ```
