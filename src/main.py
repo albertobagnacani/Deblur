@@ -14,13 +14,16 @@ import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import Input
-from tensorflow.keras.callbacks import TensorBoard
-from tensorflow.keras.layers import Conv2D, Conv2DTranspose, Add
+from tensorflow.keras.callbacks import TensorBoard, ReduceLROnPlateau, EarlyStopping, ModelCheckpoint, \
+    LearningRateScheduler
+from tensorflow.keras.layers import Conv2D, Conv2DTranspose, Add, Dropout, MaxPooling2D, UpSampling2D, \
+    Concatenate, LeakyReLU, Lambda, BatchNormalization, ReLU
 from tensorflow.keras.models import Model
-from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
 from tensorflow.keras.optimizers.schedules import PolynomialDecay
-from tensorflow.keras.callbacks import LearningRateScheduler
+from tensorflow.keras import regularizers
+from tensorflow.keras import initializers
 
+from nn.decay import MyPolynomialDecay
 from utils.eval import avg_metric, avg_metric_loaded_array
 from utils.dataset import load_cifar, blur_cifar, reshape_cifar, unpickle, keras_folder, reds_merge
 
@@ -93,6 +96,7 @@ with open(json_path) as json_file:
     mc_period = data['mc_period']
     subset = data['subset']
     action = data['action']
+    model_type = data['model']
 
 # minor_path can be 'reds' or 'cifar'; it's used to create the paths where to save things (e.g. logs, ...)
 task_path = 'reds' if 'reds' in task else 'cifar'
@@ -106,7 +110,7 @@ base_model_path = '../res/models/'+task_path
 checkpoint_filepath = base_model_path+'/checkpoints/model.{epoch:04d}-{val_loss:.4f}.h5'
 
 # Path where to save/load the model/weights
-model_weights_path = base_model_path+'/model-'+task_path+'-'+str(load_epoch)+'.h5'
+model_weights_path = base_model_path+'/model-'+task_path+'-'+model_type+'-'+str(load_epoch)+'.h5'
 final_model_path = base_model_path
 
 # Path where to save predictions
@@ -322,10 +326,10 @@ else:
     validation_steps = len(val_sharp_generator)
 
 
-# Define the NN model
+# Models
 def res_net_block(x, filters, ksize):
     """
-    Define a ResNet block (Conv2D -> Cond2D).
+    Define a ResNet block (Conv2D -> Conv2D).
 
     :param x (tf.keras.Model): Keras model on which the block will be appended (Functional API)
     :param filters (int): Number of filters
@@ -339,9 +343,9 @@ def res_net_block(x, filters, ksize):
 
 
 # def generator(inp):
-def generator(inp, x_unwrap=[]):
+def model_srn(inp, x_unwrap=[]):
     """
-    Define the generator model. See relation for deeper explanation of this part of the code.
+    Define the srn model. See relation for deeper explanation of this part of the code.
 
     :param inp (tf.keras.layers.Layer): Input of the NN
     :param x_unwrap (list): List of the logical scales (see relation)
@@ -421,9 +425,174 @@ def generator(inp, x_unwrap=[]):
     return inp_pred
 
 
-def custom_loss(x_unwrap, img_gt):
+def model_fcn(inp):
     """
-    Loss of the NN. See relation.
+    Define the fcn model. See relation for deeper explanation of this part of the code.
+
+    :param inp (tf.keras.layers.Layer): Input of the NN
+    :return: output (tf.keras.layers.Layer): last layer of the network (see relation)
+    """
+    # Hyperparameters
+    input_kernel = (3, 3)
+    hidden_kernel = (3, 3)
+    output_kernel = (3, 3)
+    input_filters = 64
+    hidden_filters = 256
+    output_filters = 3
+    input_activation = 'relu'
+    hidden_activation = 'relu'
+    output_activation = 'sigmoid'
+    padding = 'same'
+    kernel_regularizer = None
+    activity_regularizer = None
+    dilation_rate_outer = (1, 1)  # (2, 2) Remember: change those if loading dilated fcn weights
+    dilation_rate_inner = (1, 1)  # (4, 4)
+
+    conv1 = Conv2D(input_filters, kernel_size=input_kernel, activation=input_activation, padding=padding,
+                   kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer)(inp)
+    conv2 = Conv2D(hidden_filters, kernel_size=hidden_kernel, activation=hidden_activation, padding=padding,
+                   kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer,
+                   dilation_rate=dilation_rate_outer)(conv1)
+    conv3 = Conv2D(hidden_filters, kernel_size=hidden_kernel, activation=hidden_activation, padding=padding,
+                   kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer,
+                   dilation_rate=dilation_rate_inner)(conv2)
+    conv4 = Conv2D(hidden_filters, kernel_size=hidden_kernel, activation=hidden_activation, padding=padding,
+                   kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer,
+                   dilation_rate=dilation_rate_inner)(conv3)
+    conv5 = Conv2D(hidden_filters, kernel_size=hidden_kernel, activation=hidden_activation, padding=padding,
+                   kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer,
+                   dilation_rate=dilation_rate_outer)(conv4)
+    conv6 = Conv2D(hidden_filters, kernel_size=hidden_kernel, activation=hidden_activation, padding=padding,
+                   kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer)(conv5)
+    drop = Dropout(0.5)(conv6)
+    output = Conv2D(output_filters, kernel_size=output_kernel, activation=output_activation, padding=padding,
+                    kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer)(drop)
+
+    return output
+
+
+def model_unet(inp):
+    """
+    Define the unet model. See relation for deeper explanation of this part of the code.
+
+    :param inp (tf.keras.layers.Layer): Input of the NN
+    :return: output (tf.keras.layers.Layer): last layer of the network (see relation)
+    """
+    conv1 = Conv2D(32, (3, 3), name='conv1', padding="same")(inp)
+    conv1 = LeakyReLU(alpha=0.2)(conv1)
+    conv1 = Conv2D(32, (3, 3), name='conv1a', padding="same")(conv1)
+    conv1 = LeakyReLU(alpha=0.2)(conv1)
+    pool1 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_1")(conv1)
+
+    conv2 = Conv2D(64, (3, 3), name='conv2', padding="same")(pool1)
+    conv2 = LeakyReLU(alpha=0.2)(conv2)
+    conv2 = Conv2D(64, (3, 3), name='conv2a', padding="same")(conv2)
+    conv2 = LeakyReLU(alpha=0.2)(conv2)
+    pool2 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_2")(conv2)
+
+    conv3 = Conv2D(128, (3, 3), name='conv3', padding="same")(pool2)
+    conv3 = LeakyReLU(alpha=0.2)(conv3)
+    conv3 = Conv2D(128, (3, 3), name='conv3a', padding="same")(conv3)
+    conv3 = LeakyReLU(alpha=0.2)(conv3)
+    pool3 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_3")(conv3)
+
+    conv4 = Conv2D(256, (3, 3), name='conv4', padding="same")(pool3)
+    conv4 = LeakyReLU(alpha=0.2)(conv4)
+    conv4 = Conv2D(256, (3, 3), name='conv4a', padding="same")(conv4)
+    conv4 = LeakyReLU(alpha=0.2)(conv4)
+    pool4 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_4")(conv4)
+
+    conv5 = Conv2D(512, (3, 3), name='conv5', padding="same")(pool4)
+    conv5 = LeakyReLU(alpha=0.2)(conv5)
+    conv5 = Conv2D(512, (3, 3), name='conv5a', padding="same")(conv5)
+    conv5 = LeakyReLU(alpha=0.2)(conv5)
+
+    up6 = Conv2DTranspose(256, (3, 3), strides=(2, 2), name='deconv0', padding='same')(
+        conv5)
+    up6 = Concatenate()([conv4, up6])
+    conv6 = Conv2D(256, (3, 3), name='conv6', padding="same")(up6)
+    conv6 = LeakyReLU(alpha=0.2)(conv6)
+    conv6 = Conv2D(256, (3, 3), name='conv6a', padding="same")(conv6)
+    conv6 = LeakyReLU(alpha=0.2)(conv6)
+
+    up7 = Conv2DTranspose(128, (3, 3), strides=(2, 2), name='deconv1', padding='same')(
+        conv6)
+    up7 = Concatenate()([conv3, up7])
+    conv7 = Conv2D(128, (3, 3), name='conv7', padding="same")(up7)
+    conv7 = LeakyReLU(alpha=0.2)(conv7)
+    conv7 = Conv2D(128, (3, 3), name='conv7a', padding="same")(conv7)
+    conv7 = LeakyReLU(alpha=0.2)(conv7)
+
+    up8 = Conv2DTranspose(64, (3, 3), strides=(2, 2), name='deconv2', padding='same')(
+        conv7)
+    up8 = Concatenate()([conv2, up8])
+    conv8 = Conv2D(64, (3, 3), name='conv8', padding="same")(up8)
+    conv8 = LeakyReLU(alpha=0.2)(conv8)
+    conv8 = Conv2D(64, (3, 3), name='conv8a', padding="same")(conv8)
+    conv8 = LeakyReLU(alpha=0.2)(conv8)
+
+    up9 = Conv2DTranspose(32, (3, 3), strides=(2, 2), name='deconv3', padding='same')(
+        conv8)
+    up9 = Concatenate()([conv1, up9])
+    conv9 = Conv2D(32, (3, 3), name='conv9', padding="same")(up9)
+    conv9 = LeakyReLU(alpha=0.2)(conv9)
+    conv9 = Conv2D(32, (3, 3), name='conv9a', padding="same")(conv9)
+    conv9 = LeakyReLU(alpha=0.2)(conv9)
+
+    conv10 = Conv2D(12, (3, 3), name='conv10', padding="same")(conv9)
+    conv10 = LeakyReLU(alpha=0.2)(conv10)
+    drop = Dropout(0.3)(conv10)
+
+    output = Conv2D(3, (3, 3), name='conv11', padding="same", activation='sigmoid')(drop)
+
+    return output
+
+
+def model_rednet(inp):
+    """
+    Define the rednet model. See relation for deeper explanation of this part of the code.
+
+    :param inp (tf.keras.layers.Layer): Input of the NN
+    :return: output (tf.keras.layers.Layer): last layer of the network (see relation)
+    """
+    # Hyperparameters
+    depth = 20  # Number of fully convolutional layers
+    n_filters = 128  # Number of filters in each convolutional layer
+    kernel_size = (3, 3)  # Kernel size
+    # Step for connecting encoder layers with decoder layers through add. For skip_step=2, at each 2 layers, the j-th
+    # encoder layer E_j is connected with the  i = (depth - j) th decoder
+    skip_step = 2
+
+    num_connections = np.ceil(depth / (2 * skip_step)) if skip_step > 0 else 0
+    y = inp
+    encoder_layers = []
+    for i in range(depth // 2):
+        y = Conv2D(n_filters, kernel_size=kernel_size, padding='same', use_bias=False)(y)
+        y = BatchNormalization()(y)
+        y = ReLU()(y)
+        encoder_layers.append(y)
+    j = int((num_connections - 1) * skip_step)  # Encoder layers count
+    k = int(depth - (num_connections - 1) * skip_step)  # Decoder layers count
+    for i in range(depth // 2 + 1, depth):
+        y = Conv2DTranspose(n_filters, kernel_size=kernel_size, padding='same', use_bias=False)(y)
+        y = BatchNormalization()(y)
+        if i == k:
+            y = Add()([encoder_layers[j - 1], y])
+            k += skip_step
+            j -= skip_step
+        y = ReLU()(y)
+    y = Conv2DTranspose(3, kernel_size=kernel_size, padding="same", use_bias=False)(y)
+    y = BatchNormalization()(y)
+    y = Add()([inp, y])
+    output = ReLU()(y)
+
+    return output
+
+
+# Losses
+def custom_loss_srn(x_unwrap, img_gt):
+    """
+    Loss of the srn NN. See relation.
 
     :param x_unwrap (list): List of the logical scales (see relation)
     :param img_gt (tf.keras.layers.Layer): GT input (sharp images)
@@ -440,7 +609,17 @@ def custom_loss(x_unwrap, img_gt):
     return loss_total
 
 
-# Define some metrics
+def custom_loss_others(img_gt):
+    """
+    Loss of the others NN (fcn, unet, rednet). See relation.
+
+    :param img_gt (tf.keras.layers.Layer): GT input (sharp images)
+    :return: loss (float): loss value
+    """
+    return tf.reduce_mean((img_gt - output) ** 2)
+
+
+# Metrics
 def log10(x):
     """
     Compute the log10 (instead of ln) of a tf.Tensor.
@@ -453,7 +632,7 @@ def log10(x):
     return numerator / denominator
 
 
-def custom_psnr(x_unwrap, input_sharp, last_level=False):
+def custom_psnr_srn(x_unwrap, input_sharp, last_level=False):
     """
     PSNR metric (between predicted and sharp image).
 
@@ -461,10 +640,8 @@ def custom_psnr(x_unwrap, input_sharp, last_level=False):
     :param input_sharp (tf.keras.layers.Layer): GT input (sharp images)
     :param last_level (boolean): True if the psnr is computed only for the last level;
         False for averaging over the 3 levels
-    :return: psnr (float): psnr for the current batch (for each image averaged over the 3 (or 1) levels)
+    :return: psnr (float): psnr
     """
-    n_levels = 3
-
     metric_total = 0
     for i in range(n_levels):
         batch_s, hi, wi, channels = x_unwrap[i].get_shape().as_list()
@@ -472,7 +649,7 @@ def custom_psnr(x_unwrap, input_sharp, last_level=False):
         metric = 20*log10((1.0 ** 2) / tf.math.sqrt(tf.reduce_mean((gt_i - x_unwrap[i]) ** 2)))
         metric_total += metric
 
-    metric_total /= 3
+    metric_total /= n_levels
 
     if last_level:
         return metric
@@ -480,13 +657,38 @@ def custom_psnr(x_unwrap, input_sharp, last_level=False):
     return metric_total
 
 
+def custom_psnr_others(input_sharp):
+    """
+    PSNR metric (between predicted and sharp image).
+    :param input_sharp (tf.keras.layers.Layer): GT input (sharp images)
+    :return: psnr (float): psnr
+    """
+    return 20*log10((1.0 ** 2) / tf.math.sqrt(tf.reduce_mean((input_sharp - output) ** 2)))
+
+
 # Define the 2 inputs of the NN (sharp and blur)
 input_sharp = Input(shape=input_shape, name='input_sharp')
 input_blur = Input(shape=input_shape, name='input_blur')
 
-x_unwrap = []
 # Define the output (prediction of deblurred)
-output = generator(input_blur, x_unwrap)
+if 'srn' in model_type:
+    x_unwrap = []
+    output = model_srn(input_blur, x_unwrap)
+    loss = custom_loss_srn(x_unwrap, input_sharp)
+    custom_psnr = custom_loss_srn(x_unwrap, input_sharp)
+elif 'fcn' in model_type:
+    output = model_fcn(input_blur)
+    loss = custom_loss_others(input_sharp)
+    custom_psnr = custom_psnr_others(input_sharp)
+elif 'unet' in model_type:
+    output = model_unet(input_blur)
+    loss = custom_loss_others(input_sharp)
+    custom_psnr = custom_psnr_others(input_sharp)
+elif 'rednet' in model_type:
+    output = model_rednet(input_blur)
+    loss = custom_loss_others(input_sharp)
+    custom_psnr = custom_psnr_others(input_sharp)
+
 # Define the model
 model = Model(inputs=[input_sharp, input_blur], outputs=output)
 
@@ -494,16 +696,16 @@ model = Model(inputs=[input_sharp, input_blur], outputs=output)
 # model = Model(inputs=[input_sharp, input_blur], outputs=x_unwrap)
 
 # Add custom loss and metric
-model.add_loss(custom_loss(x_unwrap, input_sharp))
+model.add_loss(loss)
 # Since training happens on batch of images we will use the mean of SSIM values of all the images in the batch as the
 # loss value -> batch_mean(mean_scales_mse)
-model.add_metric(custom_psnr(x_unwrap, input_sharp), name='mean_scales_psnr', aggregation='mean')
+model.add_metric(custom_psnr, name='mean_scales_psnr', aggregation='mean')  # name = 'psnr'
 # Compile the model
 OPTIMIZER = Adam(lr=initial_lr)
 model.compile(optimizer=OPTIMIZER)
 
 # Print the summary
-# print(model.summary())
+print(model.summary())
 
 # Callbacks
 tensorboard_callback = TensorBoard(log_dir=log_dir)  # , histogram_freq=1, profile_batch='1')
@@ -527,10 +729,8 @@ mc = ModelCheckpoint(filepath=checkpoint_filepath, monitor='val_loss', save_best
 
 callbacks = [tensorboard_callback, mc]
 
-if 'reds' in task:
-    callbacks.append(lrs)
-else:
-    callbacks.append(rlrop)
+if 'cifar' in task:
+    callbacks.append(LearningRateScheduler(MyPolynomialDecay(max_epochs=epochs, init_lr=initial_lr, power=5)))
 
 # Check if tf is using GPU
 # print('Using GPU: {}'.format(tf.test.is_gpu_available()))
@@ -579,16 +779,18 @@ else:  # Predict/evaluate # TODO1 do function
                 print('Predicted {}/{}'.format(count, len(test_val_sharp_generator.filenames)))
 
             avg_time = sum_time/count
+            print('Avg. time needed for predictions: {} ms'.format(avg_time))
 
         if action == 2:  # Evaluate
             original_path = reds_val_sharp+'folder/'
             deblurred_path = out+'folder/'
             # Compute metrics
             a_m, a_p, a_s = avg_metric(original_path, deblurred_path)
-            print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))
+            print('Avg. MSE, PSNR, SSIM: {:.5f}, {:.5f}, {:.5f}'.format(a_m, a_p, a_s))
     else:
         # Path where to save the images
         out = out_cifar
+        save_images = False
 
         if action >= 1:
             Path(out).mkdir(parents=True, exist_ok=True)
@@ -611,7 +813,7 @@ else:  # Predict/evaluate # TODO1 do function
                 blur.extend(batch[1]*255)
                 deblur.extend(imguint8)
 
-                if False:  # Save the images
+                if save_images:  # Save the images
                     for i in range(len(imguint8)):
                         cv2.imwrite(out+str(count+i)+'.png', imguint8[i])
 
@@ -622,6 +824,7 @@ else:  # Predict/evaluate # TODO1 do function
                     break
 
             avg_time = sum_time/count
+            print('Avg. time needed for predictions: {} ms'.format(avg_time))
 
             sharp = np.array(sharp)
             blur = np.array(blur)
@@ -629,4 +832,4 @@ else:  # Predict/evaluate # TODO1 do function
 
             # Compute metrics
             a_m, a_p, a_s = avg_metric_loaded_array(sharp, deblur)
-            print('Avg. MSE, PSNR, SSIM: {:.2f}, {:.2f}, {:.2f}'.format(a_m, a_p, a_s))
+            print('Avg. MSE, PSNR, SSIM: {:.5f}, {:.5f}, {:.5f}'.format(a_m, a_p, a_s))  # TODO1 write to a file

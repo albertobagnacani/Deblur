@@ -77,6 +77,8 @@ def blur_cifar(ds):  # TODO1 do multiprocessing
                 # Compute the random sigma
                 sigma = random.randint(min_sigma, max_sigma)
 
+                # for sigma in range(4):
+                #    blurred = []
                 for i in range(3):
                     # For each channel, blur the image
                     img_c = np.reshape(image[channel * i:channel * (i + 1)], (image_size, image_size))
@@ -86,6 +88,8 @@ def blur_cifar(ds):  # TODO1 do multiprocessing
                     blurred.extend(blurred_c)
 
                 tmp.append(blurred)
+                # img = np.array(reshape_img(blurred))
+                # cv2.imwrite('/home/alby/'+str(sigma)+'.png', img)
 
             new_entry = deepcopy(entry)  # a bit heavy
             new_entry[b'data'] = np.array(tmp)
@@ -94,9 +98,28 @@ def blur_cifar(ds):  # TODO1 do multiprocessing
     return result
 
 
+def reshape_img(image):
+    """
+    Reshape an image into the form (height, width, channels).
+
+    :param image (np.array): Loaded image
+    :return: reshaped (np.array): Reshaped image
+    """
+    img = []
+
+    for i in range(3):
+        img_c = np.reshape(image[channel * i:channel * (i + 1)], (image_size, image_size))
+
+        img.append(img_c)
+
+    reshaped = np.array(img).swapaxes(0, 1).swapaxes(1, 2)  # (3, 32, 32) -> (32, 32, 3)
+
+    return reshaped
+
+
 def reshape_cifar(ds):  # TODO1 do multiprocessing
     """
-    Reshape the cifar into the form (n_images, height, width, channels)
+    Reshape the cifar into the form (n_images, height, width, channels).
 
     :param ds (np.array): Loaded dataset
     :return: reshaped (np.array): Reshaped dataset
@@ -190,3 +213,21 @@ def keras_folder(paths):
         res[key] = new_p
 
     return res
+
+
+'''
+if __name__ == "__main__":
+    cifar_path = '../../res/datasets/cifar-10/'
+    cifar_path_modified = cifar_path + 'modified/'
+    cifar_train_path = cifar_path_modified + 'data_batch_unified'
+    cifar_test_path = cifar_path_modified + 'test_batch'
+    cifar_blurred_train_path = cifar_path_modified + 'data_batch_unified_blurred'
+    cifar_blurred_test_path = cifar_path_modified + 'test_batch_blurred'
+    cifar_saved_paths = {'train': cifar_path + 'saved/train/original/', 'train_b': cifar_path + 'saved/train/blurred/',
+                         'test': cifar_path + 'saved/test/original/', 'test_b': cifar_path + 'saved/test/blurred/'}
+
+    cifar = {'train': unpickle(cifar_train_path), 'test': unpickle(cifar_test_path),
+             'train_b': unpickle(cifar_blurred_train_path), 'test_b': unpickle(cifar_blurred_test_path)}
+    dataset = load_cifar(cifar_path)
+    ds_blurred = blur_cifar(dataset)
+'''

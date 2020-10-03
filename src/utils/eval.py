@@ -1,6 +1,7 @@
 from os import listdir
 from os.path import isfile, join
 
+import numpy as np
 import cv2
 from skimage.metrics import peak_signal_noise_ratio, mean_squared_error, structural_similarity
 
@@ -28,6 +29,8 @@ def avg_metric(sharp_path, deblurred_path):  # TODO1 do multiprocessing in those
         # Load images
         orig_img = cv2.imread(orig_fn)
         deb_img = cv2.imread(deb_fn)
+        orig_img = np.divide(orig_img, 255)
+        deb_img = np.divide(deb_img, 255)
 
         # Compute metrics
         sum_psnr += peak_signal_noise_ratio(orig_img, deb_img)
@@ -60,7 +63,9 @@ def avg_metric_loaded_array(sharp_arr, deblurred_arr):
     count = 0
     for orig, deb in zip(sharp_arr, deblurred_arr):
         # Compute metrics
-        sum_psnr += peak_signal_noise_ratio(orig, deb, data_range=255.0)
+        orig /= 255.
+        deb /= 255.
+        sum_psnr += peak_signal_noise_ratio(orig, deb)
         sum_mse += mean_squared_error(orig, deb)
         sum_ssim += structural_similarity(orig, deb, multichannel=True)
 

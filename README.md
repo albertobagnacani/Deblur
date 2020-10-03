@@ -77,20 +77,33 @@ res/datasets/reds/train/train_sharp/001
 ...
 ```
 
-# Download weights
-Create the directories that will contain the weights:
+# Download models
+Create the directories that will contain the models:
 ```
-mkdir -p res/models/reds/
-mkdir -p res/models/cifar/
+mkdir -p res/models/reds/checkpoints/
+mkdir -p res/models/cifar/checkpoints/
 ```
 
-Download the weights from here (~ 237 MB each):
-- REDS: https://drive.google.com/file/d/1nlkpi-Q3U7RGKczhXdrwtbt-HbkNHItU/view?usp=sharing
-- CIFAR-10: https://drive.google.com/file/d/1hx1-D4ogGWjbXjdBDZvo7RsANlFbCnl_/view?usp=sharing
+Download the models from here:
+- REDS-srn: https://drive.google.com/file/d/1nlkpi-Q3U7RGKczhXdrwtbt-HbkNHItU/view?usp=sharing
+- CIFAR-10-srn: https://drive.google.com/file/d/1hx1-D4ogGWjbXjdBDZvo7RsANlFbCnl_/view?usp=sharing
+- CIFAR-10-fcn: https://drive.google.com/file/d/1JNxLsSgLPNn_diqfMNTJHNBbNY-o-Qu6/view?usp=sharing
+- CIFAR-10-unet: https://drive.google.com/file/d/1EbckBTXt0N3KS5yFVR4eT9GXzzM5lyI7/view?usp=sharing
+- CIFAR-10-rednet: https://drive.google.com/file/d/1thLvmVehKwrccgdJlBYUx10wmn3tyrjO/view?usp=sharing
 
-Move the downloaded files in the following paths (be aware to respect this naming): 
-- REDS: `res/models/reds/model-reds-100.h5`
-- CIFAR-10: `res/models/cifar/model-cifar-100.h5`
+Move the downloaded files in the following paths (parent of the created `checkpoints` folders; be aware to respect this 
+naming): 
+- REDS-srn: `res/models/reds/`
+- CIFAR-10-(srn/fcn/unet/rednet): `res/models/cifar/`
+
+The structure should be:
+```
+res/models/reds/model-reds-srn-100.h5
+res/models/cifar/model-cifar-srn-100.h5
+res/models/cifar/model-cifar-fcn-100.h5
+res/models/cifar/model-cifar-unet-100.h5
+res/models/cifar/model-cifar-rednet-100.h5
+```
 
 # Run
 Enter the `src` folder:
@@ -110,6 +123,7 @@ Note that the first run may need some time to prepare the datasets in the struct
 ## params.json file
 The `src/params.json` contains a list of (hyper)parameters to run the script:
 - "task": "cifar" or "reds". Dataset on which perform the training/prediction/evaluation
+- "model": "srn" or "fcn" or "unet" or "rednet". The architecture to load
 - "epochs": int. Number of epochs to train
 - "batch_size": int. Batch size (on NVIDIA GEFORCE RTX 2060, batch size = 8 for the REDS task and batch size = 32 
 for the CIFAR task (up to 512 in this case))
@@ -125,7 +139,7 @@ false otherwise
 the model/weights are saved at each epoch
 
 The REDS test set (the downloaded validation set is actually used as a test set) predictions can be found in the 
-`res/datasets/REDS/out/val/folder/`
+`res/datasets/REDS/out/val/folder/` folder.
 
 ### Examples for params.json file
 For training a new model, set:
