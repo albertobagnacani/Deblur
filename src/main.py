@@ -478,72 +478,76 @@ def model_unet(inp):
     :param inp (tf.keras.layers.Layer): Input of the NN
     :return: output (tf.keras.layers.Layer): last layer of the network (see relation)
     """
-    conv1 = Conv2D(32, (3, 3), name='conv1', padding="same")(inp)
+    padding = 'same'
+    strides = (2, 2)
+    kernel_size = (3, 3)
+
+    conv1 = Conv2D(32, kernel_size, padding=padding)(inp)
     conv1 = LeakyReLU(alpha=0.2)(conv1)
-    conv1 = Conv2D(32, (3, 3), name='conv1a', padding="same")(conv1)
+    conv1 = Conv2D(32, kernel_size, padding=padding)(conv1)
     conv1 = LeakyReLU(alpha=0.2)(conv1)
-    pool1 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_1")(conv1)
+    pool1 = MaxPooling2D(pool_size=(3, 3), strides=strides, padding=padding)(conv1)
 
-    conv2 = Conv2D(64, (3, 3), name='conv2', padding="same")(pool1)
+    conv2 = Conv2D(64, kernel_size, padding=padding)(pool1)
     conv2 = LeakyReLU(alpha=0.2)(conv2)
-    conv2 = Conv2D(64, (3, 3), name='conv2a', padding="same")(conv2)
+    conv2 = Conv2D(64, kernel_size, padding=padding)(conv2)
     conv2 = LeakyReLU(alpha=0.2)(conv2)
-    pool2 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_2")(conv2)
+    pool2 = MaxPooling2D(pool_size=(3, 3), strides=strides, padding=padding)(conv2)
 
-    conv3 = Conv2D(128, (3, 3), name='conv3', padding="same")(pool2)
+    conv3 = Conv2D(128, kernel_size, padding=padding)(pool2)
     conv3 = LeakyReLU(alpha=0.2)(conv3)
-    conv3 = Conv2D(128, (3, 3), name='conv3a', padding="same")(conv3)
+    conv3 = Conv2D(128, kernel_size, padding=padding)(conv3)
     conv3 = LeakyReLU(alpha=0.2)(conv3)
-    pool3 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_3")(conv3)
+    pool3 = MaxPooling2D(pool_size=kernel_size, strides=strides, padding=padding)(conv3)
 
-    conv4 = Conv2D(256, (3, 3), name='conv4', padding="same")(pool3)
+    conv4 = Conv2D(256, kernel_size, padding=padding)(pool3)
     conv4 = LeakyReLU(alpha=0.2)(conv4)
-    conv4 = Conv2D(256, (3, 3), name='conv4a', padding="same")(conv4)
+    conv4 = Conv2D(256, kernel_size, padding=padding)(conv4)
     conv4 = LeakyReLU(alpha=0.2)(conv4)
-    pool4 = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding="same", name="max_pooling_4")(conv4)
+    pool4 = MaxPooling2D(pool_size=(3, 3), strides=strides, padding=padding)(conv4)
 
-    conv5 = Conv2D(512, (3, 3), name='conv5', padding="same")(pool4)
+    conv5 = Conv2D(512, kernel_size, padding=padding)(pool4)
     conv5 = LeakyReLU(alpha=0.2)(conv5)
-    conv5 = Conv2D(512, (3, 3), name='conv5a', padding="same")(conv5)
+    conv5 = Conv2D(512, kernel_size, padding=padding)(conv5)
     conv5 = LeakyReLU(alpha=0.2)(conv5)
 
-    up6 = Conv2DTranspose(256, (3, 3), strides=(2, 2), name='deconv0', padding='same')(
+    up6 = Conv2DTranspose(256, kernel_size, strides=strides, padding=padding)(
         conv5)
     up6 = Concatenate()([conv4, up6])
-    conv6 = Conv2D(256, (3, 3), name='conv6', padding="same")(up6)
+    conv6 = Conv2D(256, kernel_size, padding=padding)(up6)
     conv6 = LeakyReLU(alpha=0.2)(conv6)
-    conv6 = Conv2D(256, (3, 3), name='conv6a', padding="same")(conv6)
+    conv6 = Conv2D(256, kernel_size, padding=padding)(conv6)
     conv6 = LeakyReLU(alpha=0.2)(conv6)
 
-    up7 = Conv2DTranspose(128, (3, 3), strides=(2, 2), name='deconv1', padding='same')(
+    up7 = Conv2DTranspose(128, kernel_size, strides=strides, padding=padding)(
         conv6)
     up7 = Concatenate()([conv3, up7])
-    conv7 = Conv2D(128, (3, 3), name='conv7', padding="same")(up7)
+    conv7 = Conv2D(128, kernel_size, padding=padding)(up7)
     conv7 = LeakyReLU(alpha=0.2)(conv7)
-    conv7 = Conv2D(128, (3, 3), name='conv7a', padding="same")(conv7)
+    conv7 = Conv2D(128, kernel_size, padding=padding)(conv7)
     conv7 = LeakyReLU(alpha=0.2)(conv7)
 
-    up8 = Conv2DTranspose(64, (3, 3), strides=(2, 2), name='deconv2', padding='same')(
+    up8 = Conv2DTranspose(64, kernel_size, strides=strides, padding=padding)(
         conv7)
     up8 = Concatenate()([conv2, up8])
-    conv8 = Conv2D(64, (3, 3), name='conv8', padding="same")(up8)
+    conv8 = Conv2D(64, kernel_size, padding=padding)(up8)
     conv8 = LeakyReLU(alpha=0.2)(conv8)
-    conv8 = Conv2D(64, (3, 3), name='conv8a', padding="same")(conv8)
+    conv8 = Conv2D(64, kernel_size, padding=padding)(conv8)
     conv8 = LeakyReLU(alpha=0.2)(conv8)
 
-    up9 = Conv2DTranspose(32, (3, 3), strides=(2, 2), name='deconv3', padding='same')(
+    up9 = Conv2DTranspose(32, kernel_size, strides=strides, padding=padding)(
         conv8)
     up9 = Concatenate()([conv1, up9])
-    conv9 = Conv2D(32, (3, 3), name='conv9', padding="same")(up9)
+    conv9 = Conv2D(32, kernel_size, padding=padding)(up9)
     conv9 = LeakyReLU(alpha=0.2)(conv9)
-    conv9 = Conv2D(32, (3, 3), name='conv9a', padding="same")(conv9)
+    conv9 = Conv2D(32, kernel_size, padding=padding)(conv9)
     conv9 = LeakyReLU(alpha=0.2)(conv9)
 
-    conv10 = Conv2D(12, (3, 3), name='conv10', padding="same")(conv9)
+    conv10 = Conv2D(12, kernel_size, padding=padding)(conv9)
     conv10 = LeakyReLU(alpha=0.2)(conv10)
     drop = Dropout(0.3)(conv10)
 
-    output = Conv2D(3, (3, 3), name='conv11', padding="same", activation='sigmoid')(drop)
+    output = Conv2D(3, kernel_size, padding=padding, activation='sigmoid')(drop)
 
     return output
 
