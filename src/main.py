@@ -339,7 +339,7 @@ def res_net_block(x, filters, ksize):
     net = Conv2D(filters=filters, kernel_size=(ksize, ksize), padding='same', activation='relu')(x)
     net = Conv2D(filters=filters, kernel_size=(ksize, ksize), padding='same', activation=None)(net)
 
-    return net
+    return net  # + x
 
 
 # def generator(inp):
@@ -425,7 +425,7 @@ def model_srn(inp, x_unwrap=[]):
     return inp_pred
 
 
-def model_fcn(inp):
+def model_fcn(inp, dilated=False):
     """
     Define the fcn model. See relation for deeper explanation of this part of the code.
 
@@ -445,8 +445,8 @@ def model_fcn(inp):
     padding = 'same'
     kernel_regularizer = None
     activity_regularizer = None
-    dilation_rate_outer = (1, 1)  # (2, 2) Remember: change those if loading dilated fcn weights
-    dilation_rate_inner = (1, 1)  # (4, 4)
+    dilation_rate_outer = (1, 1) if not dilated else (2, 2)
+    dilation_rate_inner = (1, 1) if not dilated else (4, 4)
 
     conv1 = Conv2D(input_filters, kernel_size=input_kernel, activation=input_activation, padding=padding,
                    kernel_regularizer=kernel_regularizer, activity_regularizer=activity_regularizer)(inp)
@@ -567,7 +567,7 @@ def model_rednet(inp):
     # encoder layer E_j is connected with the  i = (depth - j) th decoder
     skip_step = 2
 
-    num_connections = np.ceil(depth / (2 * skip_step)) if skip_step > 0 else 0
+    num_connections = np.ceil(depth / (2 * skip_step)) if skip_step > 0 else 0  # 5
     y = inp
     encoder_layers = []
     for i in range(depth // 2):
@@ -575,8 +575,8 @@ def model_rednet(inp):
         y = BatchNormalization()(y)
         y = ReLU()(y)
         encoder_layers.append(y)
-    j = int((num_connections - 1) * skip_step)  # Encoder layers count
-    k = int(depth - (num_connections - 1) * skip_step)  # Decoder layers count
+    j = int((num_connections - 1) * skip_step)  # Encoder layers count # 8
+    k = int(depth - (num_connections - 1) * skip_step)  # Decoder layers count # 12
     for i in range(depth // 2 + 1, depth):
         y = Conv2DTranspose(n_filters, kernel_size=kernel_size, padding='same', use_bias=False)(y)
         y = BatchNormalization()(y)

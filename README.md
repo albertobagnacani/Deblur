@@ -1,12 +1,8 @@
 # Scale-recurrent Network for Deep Image Deblurring
-For the project details, see `Relation_Bagnacani.pdf`
+For the project details, see:
+- Relation: https://docs.google.com/document/d/1LiOAaUSIEWBpxRx6_HTnsfB5-Y9ZCqZPKQxvQJNx9RQ/edit?usp=sharing
+- Presentation: https://docs.google.com/presentation/d/1uKaZ98-PazS-LcbIWVa0RbZZUyG4oiORhSBVfOCI5so/edit?usp=sharing
 
-<!--
-For the project details, see 
-https://docs.google.com/document/d/1LiOAaUSIEWBpxRx6_HTnsfB5-Y9ZCqZPKQxvQJNx9RQ/edit?usp=sharing
--->
-
-<!--
 # Download the project
 ```
 git clone https://github.com/albertobagnacani/Deblur.git
@@ -15,7 +11,6 @@ and cd it:
 ```
 cd Deblur/
 ```
--->
 
 # Deployment
 Run
